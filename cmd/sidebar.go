@@ -31,7 +31,7 @@ func runSidebar() error {
 	}
 
 	app := tui.NewApp(manager, defaultDir)
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithReportFocus())
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("TUI error: %w", err)
 	}

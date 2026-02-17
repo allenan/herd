@@ -23,6 +23,7 @@ type App struct {
 	height     int
 	defaultDir string
 	err        string
+	focused    bool
 }
 
 func NewApp(manager *tmux.Manager, defaultDir string) App {
@@ -36,11 +37,12 @@ func NewApp(manager *tmux.Manager, defaultDir string) App {
 		prompt:     NewPromptModel(),
 		manager:    manager,
 		defaultDir: defaultDir,
+		focused:    true,
 	}
 }
 
 func (a App) Init() tea.Cmd {
-	return nil
+	return tea.EnableReportFocus
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -48,6 +50,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
+		return a, nil
+	case tea.FocusMsg:
+		a.focused = true
+		return a, nil
+	case tea.BlurMsg:
+		a.focused = false
 		return a, nil
 	}
 
@@ -64,10 +72,10 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, keys.Quit):
-			// Detach the user from the herd tmux session before quitting.
-			// Sessions keep running in the background.
+			// Detach the user's terminal. The sidebar process keeps
+			// running inside tmux so state is preserved on re-attach.
 			tmux.TmuxRun("detach-client")
-			return a, tea.Quit
+			return a, nil
 		case key.Matches(msg, keys.Up):
 			a.sidebar.MoveUp()
 		case key.Matches(msg, keys.Down):
@@ -89,6 +97,8 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if sel := a.sidebar.Selected(); sel != nil {
 				a.manager.KillSession(sel.ID)
 				a.sidebar.SetSessions(a.manager.ListSessions())
+				a.sidebar.SetActive(a.manager.State.LastActiveSession)
+				a.err = ""
 			}
 		}
 	}
@@ -114,20 +124,33 @@ func (a App) updatePrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) View() string {
-	title := titleStyle.Render("herd")
+	var title string
+	if a.focused {
+		title = titleStyle.Render("🐕 herd")
+	} else {
+		title = titleBlurredStyle.Render("🐕 herd")
+	}
 
 	var body string
 	if a.mode == modePrompt {
-		body = a.sidebar.View(a.width, a.height) + "\n\n" + a.prompt.View()
+		body = a.sidebar.View(a.width, a.height, a.focused) + "\n\n" + a.prompt.View()
 	} else {
-		body = a.sidebar.View(a.width, a.height)
+		body = a.sidebar.View(a.width, a.height, a.focused)
 	}
 
 	var statusLine string
-	if a.err != "" {
-		statusLine = errStyle.Render("err: "+a.err) + "\n" + statusBarStyle.Render("[n]ew [d]el [q]uit")
+	if a.focused {
+		if a.err != "" {
+			statusLine = errStyle.Render("err: "+a.err) + "\n" + statusBarStyle.Render("[n]ew [d]el [q]uit")
+		} else {
+			statusLine = statusBarStyle.Render("[n]ew [d]el [q]uit")
+		}
 	} else {
-		statusLine = statusBarStyle.Render("[n]ew [d]el [q]uit")
+		if a.err != "" {
+			statusLine = errBlurredStyle.Render("err: "+a.err) + "\n" + statusBarBlurredStyle.Render("ctrl-] sidebar")
+		} else {
+			statusLine = statusBarBlurredStyle.Render("ctrl-] sidebar")
+		}
 	}
 	hints := statusLine
 
@@ -144,5 +167,12 @@ func (a App) View() string {
 		padding += "\n"
 	}
 
-	return content + padding + hints
+	output := content + padding + hints
+
+	// Constrain output to pane dimensions to prevent line wrapping artifacts
+	if a.width > 0 {
+		output = lipgloss.NewStyle().MaxWidth(a.width).Render(output)
+	}
+
+	return output
 }

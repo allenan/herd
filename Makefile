@@ -13,7 +13,9 @@ clean:
 	rm -f $(BINARY)
 
 kill:
-	tmux -L herd kill-server 2>/dev/null || true
+	tmux -S ~/.herd/tmux.sock kill-server 2>/dev/null || true
+	pkill -f "herd --sidebar" 2>/dev/null || true
+	rm -rf ~/.herd
 
 vet:
 	go vet ./...

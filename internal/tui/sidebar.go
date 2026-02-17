@@ -25,6 +25,12 @@ func (m *SidebarModel) SetSessions(sessions []session.Session) {
 
 func (m *SidebarModel) SetActive(id string) {
 	m.activeID = id
+	for i, s := range m.sessions {
+		if s.ID == id {
+			m.cursor = i
+			return
+		}
+	}
 }
 
 func (m *SidebarModel) MoveUp() {
@@ -46,9 +52,12 @@ func (m *SidebarModel) Selected() *session.Session {
 	return &m.sessions[m.cursor]
 }
 
-func (m SidebarModel) View(width, height int) string {
+func (m SidebarModel) View(width, height int, focused bool) string {
 	if len(m.sessions) == 0 {
-		return normalStyle.Render("  No sessions yet.\n  Press n to create one.")
+		if focused {
+			return normalStyle.Render("  No sessions yet.\n  Press n to create one.")
+		}
+		return normalBlurredStyle.Render("  No sessions yet.")
 	}
 
 	var s string
@@ -56,10 +65,18 @@ func (m SidebarModel) View(width, height int) string {
 		indicator := statusIndicator(sess.Status)
 		name := fmt.Sprintf("%s/%s", sess.Project, sess.Name)
 
-		if i == m.cursor {
-			s += selectedStyle.Render(fmt.Sprintf("> %s %s", indicator, name)) + "\n"
+		if focused {
+			if i == m.cursor {
+				s += selectedStyle.Render(fmt.Sprintf("> %s %s", indicator, name)) + "\n"
+			} else {
+				s += normalStyle.Render(fmt.Sprintf("  %s %s", indicator, name)) + "\n"
+			}
 		} else {
-			s += normalStyle.Render(fmt.Sprintf("  %s %s", indicator, name)) + "\n"
+			if i == m.cursor {
+				s += selectedBlurredStyle.Render(fmt.Sprintf("  %s %s", indicator, name)) + "\n"
+			} else {
+				s += normalBlurredStyle.Render(fmt.Sprintf("  %s %s", indicator, name)) + "\n"
+			}
 		}
 	}
 	return s

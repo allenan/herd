@@ -91,17 +91,27 @@ func runMain() error {
 		return fmt.Errorf("failed to start tmux server: %w", err)
 	}
 
-	if !alreadyRunning || !htmux.HasLayout(client) {
+	if !alreadyRunning {
 		// Fresh server — old session panes are gone, clear stale entries
 		state.Sessions = nil
 		state.LastActiveSession = ""
+	}
 
+	if !alreadyRunning || !htmux.HasLayout(client) {
 		sidebarPaneID, viewportPaneID, err := htmux.SetupLayout(client)
 		if err != nil {
 			return fmt.Errorf("failed to setup layout: %w", err)
 		}
 		state.SidebarPaneID = sidebarPaneID
 		state.ViewportPaneID = viewportPaneID
+
+		// Only show the welcome placeholder on a fresh server.
+		// On re-attach (sidebar crashed), the viewport may hold
+		// an active session that we must not overwrite.
+		if !alreadyRunning {
+			htmux.ShowPlaceholder(viewportPaneID)
+		}
+
 		if err := state.Save(statePath); err != nil {
 			return fmt.Errorf("failed to save state: %w", err)
 		}
