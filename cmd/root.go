@@ -1,0 +1,112 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+	"runtime"
+
+	"github.com/allenan/herd/internal/session"
+	htmux "github.com/allenan/herd/internal/tmux"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/cobra"
+)
+
+var sidebarFlag bool
+
+var rootCmd = &cobra.Command{
+	Use:   "herd",
+	Short: "TUI manager for multiple Claude Code sessions",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if sidebarFlag {
+			return runSidebar()
+		}
+		return runMain()
+	},
+}
+
+func init() {
+	rootCmd.Flags().BoolVar(&sidebarFlag, "sidebar", false, "run sidebar TUI (internal)")
+	rootCmd.Flags().MarkHidden("sidebar")
+}
+
+func Execute() {
+	// Unset TMUX so herd works when launched from inside another tmux session.
+	// We use our own dedicated socket, so nesting is safe.
+	os.Unsetenv("TMUX")
+
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func printTmuxMissing() {
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("205")).
+		Padding(1, 2)
+
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("205")).
+		Render("herd requires tmux")
+
+	body := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Render("tmux was not found in your PATH.\nInstall it and try again:")
+
+	var cmd string
+	if runtime.GOOS == "darwin" {
+		cmd = "brew install tmux"
+	} else {
+		cmd = "sudo apt install tmux   # Debian/Ubuntu\nsudo dnf install tmux   # Fedora"
+	}
+	code := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("39")).
+		Bold(true).
+		Render(cmd)
+
+	fmt.Fprintln(os.Stderr, box.Render(title+"\n\n"+body+"\n\n"+code))
+}
+
+func runMain() error {
+	if htmux.IsInsideHerd() {
+		return fmt.Errorf("already running inside herd")
+	}
+
+	if !htmux.IsInstalled() {
+		printTmuxMissing()
+		os.Exit(1)
+	}
+
+	statePath := session.DefaultStatePath()
+	state, err := session.LoadState(statePath)
+	if err != nil {
+		return fmt.Errorf("failed to load state: %w", err)
+	}
+
+	alreadyRunning := htmux.ServerRunning()
+
+	client, err := htmux.EnsureServer()
+	if err != nil {
+		return fmt.Errorf("failed to start tmux server: %w", err)
+	}
+
+	if !alreadyRunning || !htmux.HasLayout(client) {
+		// Fresh server — old session panes are gone, clear stale entries
+		state.Sessions = nil
+		state.LastActiveSession = ""
+
+		sidebarPaneID, viewportPaneID, err := htmux.SetupLayout(client)
+		if err != nil {
+			return fmt.Errorf("failed to setup layout: %w", err)
+		}
+		state.SidebarPaneID = sidebarPaneID
+		state.ViewportPaneID = viewportPaneID
+		if err := state.Save(statePath); err != nil {
+			return fmt.Errorf("failed to save state: %w", err)
+		}
+	}
+
+	// Attach to the tmux session (blocks until detach)
+	return htmux.Attach()
+}
