@@ -71,6 +71,12 @@ func (m *Manager) reloadState() {
 		m.State.ViewportPaneID = ""
 	}
 
+	// Sanity check: viewport and sidebar must never be the same pane
+	if m.State.ViewportPaneID != "" && m.State.ViewportPaneID == m.State.SidebarPaneID {
+		debugLog.Printf("reloadState: ViewportPaneID == SidebarPaneID (%s), clearing viewport", m.State.ViewportPaneID)
+		m.State.ViewportPaneID = ""
+	}
+
 	// Prune sessions whose tmux panes no longer exist
 	valid := m.State.Sessions[:0]
 	for _, s := range m.State.Sessions {
@@ -84,6 +90,62 @@ func (m *Manager) reloadState() {
 		m.State.Sessions = valid
 		m.State.Save(m.StatePath)
 	}
+}
+
+// resolveViewportPane dynamically discovers the viewport pane by querying
+// tmux for actual panes in window 0. The sidebar pane is identified by its
+// StartCommand (contains "--sidebar") or by matching SidebarPaneID; the
+// other pane in window 0 is the viewport.
+func (m *Manager) resolveViewportPane() (string, error) {
+	sess, err := m.Client.GetSessionByName("herd-main")
+	if err != nil || sess == nil {
+		return "", fmt.Errorf("resolveViewportPane: failed to get herd-main session: %w", err)
+	}
+
+	win, err := sess.GetWindowByIndex(0)
+	if err != nil || win == nil {
+		return "", fmt.Errorf("resolveViewportPane: failed to get window 0: %w", err)
+	}
+
+	panes, err := win.ListPanes()
+	if err != nil {
+		return "", fmt.Errorf("resolveViewportPane: failed to list panes: %w", err)
+	}
+
+	if len(panes) < 2 {
+		return "", fmt.Errorf("resolveViewportPane: expected >= 2 panes in window 0, got %d", len(panes))
+	}
+
+	var sidebarID string
+	for _, p := range panes {
+		if p.Id == m.State.SidebarPaneID || strings.Contains(p.StartCommand, "--sidebar") {
+			sidebarID = p.Id
+			break
+		}
+	}
+
+	if sidebarID == "" {
+		return "", fmt.Errorf("resolveViewportPane: could not identify sidebar pane among %d panes", len(panes))
+	}
+
+	// Correct SidebarPaneID if it was wrong
+	if m.State.SidebarPaneID != sidebarID {
+		debugLog.Printf("resolveViewportPane: correcting SidebarPaneID from %s to %s", m.State.SidebarPaneID, sidebarID)
+		m.State.SidebarPaneID = sidebarID
+	}
+
+	// The viewport is the non-sidebar pane in window 0
+	for _, p := range panes {
+		if p.Id != sidebarID {
+			if m.State.ViewportPaneID != p.Id {
+				debugLog.Printf("resolveViewportPane: correcting ViewportPaneID from %s to %s", m.State.ViewportPaneID, p.Id)
+				m.State.ViewportPaneID = p.Id
+			}
+			return p.Id, nil
+		}
+	}
+
+	return "", fmt.Errorf("resolveViewportPane: no non-sidebar pane found in window 0")
 }
 
 func (m *Manager) CreateSession(dir, name string) (*session.Session, error) {
@@ -141,10 +203,7 @@ func (m *Manager) CreateSession(dir, name string) (*session.Session, error) {
 
 	m.State.AddSession(newSession)
 
-	// Auto-switch if this is the first session
-	if len(m.State.Sessions) == 1 {
-		m.SwitchTo(newSession.ID)
-	}
+	m.SwitchTo(newSession.ID)
 
 	m.State.Save(m.StatePath)
 	return &newSession, nil
@@ -159,20 +218,28 @@ func (m *Manager) SwitchTo(sessionID string) error {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 
-	debugLog.Printf("SwitchTo: session=%s tmuxPane=%s viewportPane=%s", sessionID, sess.TmuxPaneID, m.State.ViewportPaneID)
-
-	if m.State.ViewportPaneID == "" {
-		debugLog.Printf("SwitchTo: no viewport pane configured")
-		return fmt.Errorf("no viewport pane configured")
+	// Dynamically resolve the viewport pane instead of trusting stored ID
+	viewportPaneID, err := m.resolveViewportPane()
+	if err != nil {
+		debugLog.Printf("SwitchTo: resolveViewportPane failed: %v", err)
+		return fmt.Errorf("no viewport pane: %w", err)
 	}
+
+	debugLog.Printf("SwitchTo: session=%s tmuxPane=%s viewportPane=%s (resolved)", sessionID, sess.TmuxPaneID, viewportPaneID)
 
 	if !paneExists(sess.TmuxPaneID) {
 		debugLog.Printf("SwitchTo: session pane %s no longer exists", sess.TmuxPaneID)
 		return fmt.Errorf("session pane %s no longer exists (stale state)", sess.TmuxPaneID)
 	}
 
+	// Guard: refuse to swap if the session pane IS the sidebar
+	if sess.TmuxPaneID == m.State.SidebarPaneID {
+		debugLog.Printf("SwitchTo: refusing to swap sidebar pane %s into viewport", sess.TmuxPaneID)
+		return fmt.Errorf("session pane %s is the sidebar pane, refusing swap", sess.TmuxPaneID)
+	}
+
 	// Already in viewport — just focus it
-	if sess.TmuxPaneID == m.State.ViewportPaneID {
+	if sess.TmuxPaneID == viewportPaneID {
 		debugLog.Printf("SwitchTo: pane %s already in viewport, focusing", sess.TmuxPaneID)
 		m.State.LastActiveSession = sessionID
 		TmuxRun("select-pane", "-t", sess.TmuxPaneID)
@@ -181,7 +248,7 @@ func (m *Manager) SwitchTo(sessionID string) error {
 	}
 
 	// Swap the session pane into the viewport
-	if err := TmuxRun("swap-pane", "-s", sess.TmuxPaneID, "-t", m.State.ViewportPaneID); err != nil {
+	if err := TmuxRun("swap-pane", "-s", sess.TmuxPaneID, "-t", viewportPaneID); err != nil {
 		debugLog.Printf("SwitchTo: swap-pane failed: %v", err)
 		return fmt.Errorf("failed to swap pane: %w", err)
 	}
@@ -217,10 +284,10 @@ func (m *Manager) KillSession(sessionID string) error {
 	isInViewport := sess.TmuxPaneID == m.State.ViewportPaneID
 	paneID := sess.TmuxPaneID
 
-	// Remove from state first, before killing the pane
+	// Remove from state first
 	m.State.RemoveSession(sessionID)
 
-	// Only kill the pane if no other session references it (safety check)
+	// Check if another session still references this pane
 	otherUsesPane := false
 	for _, s := range m.State.Sessions {
 		if s.TmuxPaneID == paneID {
@@ -230,53 +297,47 @@ func (m *Manager) KillSession(sessionID string) error {
 		}
 	}
 
-	if !otherUsesPane {
+	if otherUsesPane {
+		m.State.Save(m.StatePath)
+		return nil
+	}
+
+	if isInViewport && len(m.State.Sessions) > 0 {
+		// Swap a replacement session into the viewport BEFORE killing,
+		// so window 0 always keeps two panes (sidebar + viewport).
+		replacement := &m.State.Sessions[0]
+		if err := TmuxRun("swap-pane", "-s", replacement.TmuxPaneID, "-t", paneID); err != nil {
+			debugLog.Printf("KillSession: swap replacement failed: %v", err)
+		} else {
+			debugLog.Printf("KillSession: swapped replacement %s into viewport", replacement.TmuxPaneID)
+		}
+		// Kill the old pane (now swapped out of viewport)
 		if err := TmuxRun("kill-pane", "-t", paneID); err != nil {
 			debugLog.Printf("KillSession: kill-pane %s failed: %v", paneID, err)
 		} else {
 			debugLog.Printf("KillSession: killed pane %s", paneID)
 		}
-	}
-
-	// If the killed pane was in the viewport, find a replacement
-	if isInViewport {
-		m.State.ViewportPaneID = ""
-
-		if len(m.State.Sessions) > 0 {
-			// Use the next session's pane as the new viewport by switching to it.
-			// We need a valid viewport target first — find any non-sidebar pane
-			// in window 0 (the main window).
-			tmuxSess, err := m.Client.GetSessionByName("herd-main")
-			if err == nil && tmuxSess != nil {
-				windows, err := tmuxSess.ListWindows()
-				if err == nil {
-					for _, w := range windows {
-						panes, err := w.ListPanes()
-						if err != nil {
-							continue
-						}
-						for _, p := range panes {
-							if p.Id != m.State.SidebarPaneID {
-								m.State.ViewportPaneID = p.Id
-								debugLog.Printf("KillSession: found replacement viewport pane %s", p.Id)
-								break
-							}
-						}
-						if m.State.ViewportPaneID != "" {
-							break
-						}
-					}
-				}
-			}
-
-			if m.State.ViewportPaneID != "" {
-				debugLog.Printf("KillSession: switching to session %s", m.State.Sessions[0].ID)
-				m.SwitchTo(m.State.Sessions[0].ID)
-			} else {
-				debugLog.Printf("KillSession: no replacement viewport pane found")
-			}
+		m.State.ViewportPaneID = replacement.TmuxPaneID
+		m.State.LastActiveSession = replacement.ID
+		TmuxRun("select-pane", "-t", replacement.TmuxPaneID)
+		debugLog.Printf("KillSession: switched to replacement session %s pane=%s", replacement.ID, replacement.TmuxPaneID)
+	} else if isInViewport {
+		// No sessions left — respawn the viewport pane with placeholder
+		// instead of killing it, so the two-pane layout stays intact.
+		placeholderCmd := `printf '\033[?25l\n\n        \033[1;38;5;205m🐕 herd\033[0m\n\n    \033[38;5;241mCreate a session to get started.\n    Press n in the sidebar.\033[0m\n'; exec cat`
+		if err := TmuxRun("respawn-pane", "-k", "-t", paneID, "sh", "-c", placeholderCmd); err != nil {
+			debugLog.Printf("KillSession: respawn-pane placeholder failed: %v", err)
 		} else {
-			debugLog.Printf("KillSession: no sessions left")
+			debugLog.Printf("KillSession: respawned viewport pane %s with placeholder", paneID)
+		}
+		m.State.LastActiveSession = ""
+		TmuxRun("select-pane", "-t", m.State.SidebarPaneID)
+	} else {
+		// Not in viewport — just kill the pane
+		if err := TmuxRun("kill-pane", "-t", paneID); err != nil {
+			debugLog.Printf("KillSession: kill-pane %s failed: %v", paneID, err)
+		} else {
+			debugLog.Printf("KillSession: killed pane %s", paneID)
 		}
 	}
 

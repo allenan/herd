@@ -32,6 +32,28 @@ var (
 			Foreground(lipgloss.Color("196")).
 			PaddingLeft(1)
 
+	titleBlurredStyle = lipgloss.NewStyle().
+				Faint(true).
+				PaddingLeft(1).
+				PaddingBottom(1)
+
+	selectedBlurredStyle = lipgloss.NewStyle().
+				Faint(true).
+				PaddingLeft(1)
+
+	normalBlurredStyle = lipgloss.NewStyle().
+				Faint(true).
+				PaddingLeft(1)
+
+	statusBarBlurredStyle = lipgloss.NewStyle().
+				Faint(true).
+				PaddingTop(1).
+				PaddingLeft(1)
+
+	errBlurredStyle = lipgloss.NewStyle().
+			Faint(true).
+			PaddingLeft(1)
+
 	statusRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("*")
 	statusInput   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("!")
 	statusIdle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("o")
