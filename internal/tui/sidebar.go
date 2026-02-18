@@ -195,7 +195,8 @@ func (m SidebarModel) View(width, height int, focused bool, spinnerFrame string)
 		case itemProject:
 			s += m.renderProject(item.project, isCursor, focused) + "\n"
 		case itemSession:
-			s += m.renderSession(item.session, isCursor, focused, spinnerFrame) + "\n"
+			isActive := item.session != nil && item.session.ID == m.activeID
+			s += m.renderSession(item.session, isCursor, focused, isActive, spinnerFrame) + "\n"
 		}
 	}
 	return s
@@ -208,36 +209,70 @@ func (m SidebarModel) renderProject(project string, isCursor, focused bool) stri
 	}
 	count := fmt.Sprintf("(%d)", m.sessionCount(project))
 
+	var glyph string
+	if isCursor {
+		glyph = cursorGlyph + " "
+	} else {
+		glyph = "  "
+	}
+
 	if focused {
 		if isCursor {
 			countStr := sessionCountStyle.Render(count)
 			name := selectedStyle.Render(project)
-			return fmt.Sprintf(" %s %s %s %s", cursorGlyph, chevron, name, countStr)
+			return fmt.Sprintf("  %s %s %s %s", glyph, chevron, name, countStr)
 		}
 		countStr := sessionCountStyle.Render(count)
 		name := projectHeaderStyle.Render(project)
-		return fmt.Sprintf("   %s %s %s", chevron, name, countStr)
+		return fmt.Sprintf("  %s %s %s %s", glyph, chevron, name, countStr)
 	}
 
 	countStr := sessionCountBlurredStyle.Render(count)
 	name := projectHeaderBlurredStyle.Render(project)
-	return fmt.Sprintf("   %s %s %s", chevron, name, countStr)
+	return fmt.Sprintf("  %s %s %s %s", glyph, chevron, name, countStr)
 }
 
-func (m SidebarModel) renderSession(sess *session.Session, isCursor, focused bool, spinnerFrame string) string {
-	indicator := statusIndicator(sess.Status, spinnerFrame)
+func truncate(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max-1]) + "~"
+}
 
-	if focused {
-		if isCursor {
-			name := selectedStyle.Render(sess.Name)
-			return fmt.Sprintf(" %s   %s %s", cursorGlyph, indicator, name)
-		}
-		name := normalStyle.Render(sess.Name)
-		return fmt.Sprintf("       %s %s", indicator, name)
+func (m SidebarModel) renderSession(sess *session.Session, isCursor, focused, isActive bool, spinnerFrame string) string {
+	indicator := statusIndicator(sess.Status, spinnerFrame)
+	display := truncate(sess.DisplayName(), 24)
+
+	// All sessions use the same layout: " GG  I name"
+	// where GG = 2-char glyph column (▸ + space, or 2 spaces),
+	// I = status indicator. This keeps everything vertically aligned
+	// regardless of cursor/active state.
+	var glyph string
+	if isCursor {
+		glyph = cursorGlyph + " "
+	} else if isActive {
+		glyph = activeGlyph + " "
+	} else {
+		glyph = "  "
 	}
 
-	name := normalBlurredStyle.Render(sess.Name)
-	return fmt.Sprintf("       %s %s", indicator, name)
+	var name string
+	if focused {
+		if isCursor {
+			name = selectedStyle.Render(display)
+		} else {
+			name = normalStyle.Render(display)
+		}
+	} else {
+		if isActive {
+			name = activeStyle.Render(display)
+		} else {
+			name = normalBlurredStyle.Render(display)
+		}
+	}
+
+	return fmt.Sprintf("  %s %s %s", glyph, indicator, name)
 }
 
 func statusIndicator(status session.Status, spinnerFrame string) string {

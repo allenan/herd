@@ -54,6 +54,12 @@ func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID stri
 	// outer terminal (clipboard, Kitty graphics, etc.).
 	client.Command("set-option", "-g", "allow-passthrough", "on")
 
+	// Allow programs to set pane titles via OSC escape sequences.
+	// Claude Code sets terminal titles to describe what it's working on;
+	// herd captures these via #{pane_title} to auto-name sessions.
+	client.Command("set-option", "-g", "allow-rename", "on")
+	client.Command("set-option", "-g", "set-titles", "on")
+
 	// Enable extended key encoding (CSI u / modifyOtherKeys) so modern
 	// TUI programs can distinguish key combinations correctly.
 	client.Command("set-option", "-g", "extended-keys", "on")
@@ -70,7 +76,7 @@ func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID stri
 
 	// Split window: -h horizontal, -b before (left side), -l size
 	_, err = client.Command(
-		"split-window", "-h", "-b", "-l", "24",
+		"split-window", "-h", "-b", "-l", "28",
 		"-t", viewportPaneID,
 		selfBin, "--sidebar",
 	)
@@ -137,7 +143,7 @@ func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID stri
 	// Pin sidebar to fixed width. The initial split happens on a detached
 	// session (small default size); tmux proportionally scales panes when a
 	// client attaches or the terminal is resized. These hooks correct it.
-	resizeCmd := fmt.Sprintf("resize-pane -t %s -x 28", sidebarPaneID)
+	resizeCmd := fmt.Sprintf("resize-pane -t %s -x 32", sidebarPaneID)
 	client.Command("set-hook", "-t", "herd-main", "client-attached[0]", resizeCmd)
 	client.Command("set-hook", "-t", "herd-main", "client-resized[0]", resizeCmd)
 

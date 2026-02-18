@@ -11,12 +11,10 @@ var (
 
 	selectedStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("170")).
-			Bold(true).
-			PaddingLeft(1)
+			Bold(true)
 
 	normalStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")).
-			PaddingLeft(1)
+			Foreground(lipgloss.Color("252"))
 
 	statusBarStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241")).
@@ -42,8 +40,7 @@ var (
 				PaddingLeft(1)
 
 	normalBlurredStyle = lipgloss.NewStyle().
-				Faint(true).
-				PaddingLeft(1)
+				Faint(true)
 
 	statusBarBlurredStyle = lipgloss.NewStyle().
 				Faint(true).
@@ -63,12 +60,10 @@ var (
 	// Project header styles
 	projectHeaderStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("39")).
-				Bold(true).
-				PaddingLeft(1)
+				Bold(true)
 
 	projectHeaderBlurredStyle = lipgloss.NewStyle().
-					Faint(true).
-					PaddingLeft(1)
+					Faint(true)
 
 	// Session count shown after project name
 	sessionCountStyle = lipgloss.NewStyle().
@@ -82,4 +77,11 @@ var (
 
 	// Cursor indicator
 	cursorGlyph = lipgloss.NewStyle().Foreground(lipgloss.Color("170")).Bold(true).Render("▸")
+
+	// Active session indicator (when cursor is elsewhere)
+	activeGlyph = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("▸")
+
+	// Active session name style when sidebar is unfocused
+	activeStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
 )
