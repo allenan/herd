@@ -295,7 +295,7 @@ func (m *Manager) SwitchTo(sessionID string) error {
 	if sess.TmuxPaneID == viewportPaneID {
 		debugLog.Printf("SwitchTo: pane %s already in viewport, focusing", sess.TmuxPaneID)
 		m.State.LastActiveSession = sessionID
-		if sess.Status == session.StatusDone {
+		if sess.Status == session.StatusDone || sess.Status == session.StatusPlanReady {
 			sess.Status = session.StatusIdle
 		}
 		TmuxRun("select-pane", "-t", sess.TmuxPaneID)
@@ -314,7 +314,7 @@ func (m *Manager) SwitchTo(sessionID string) error {
 	// and the old viewport pane moved to where the session pane was.
 	m.State.ViewportPaneID = sess.TmuxPaneID
 	m.State.LastActiveSession = sessionID
-	if sess.Status == session.StatusDone {
+	if sess.Status == session.StatusDone || sess.Status == session.StatusPlanReady {
 		sess.Status = session.StatusIdle
 	}
 
@@ -514,11 +514,20 @@ func (m *Manager) RefreshStatus() bool {
 		// Running → Idle while not in viewport → mark done
 		case prev == session.StatusRunning && raw == session.StatusIdle && s.TmuxPaneID != m.State.ViewportPaneID:
 			next = session.StatusDone
+		// Running → PlanReady while not in viewport → keep PlanReady
+		case prev == session.StatusRunning && raw == session.StatusPlanReady && s.TmuxPaneID != m.State.ViewportPaneID:
+			next = session.StatusPlanReady
 		// Already done and still idle → keep done (don't let polling overwrite)
 		case prev == session.StatusDone && raw == session.StatusIdle:
 			next = session.StatusDone
 		// Done but raw changed to something else → use raw
 		case prev == session.StatusDone:
+			next = raw
+		// PlanReady + Idle → keep PlanReady (plan path scrolled off visible area)
+		case prev == session.StatusPlanReady && raw == session.StatusIdle:
+			next = session.StatusPlanReady
+		// PlanReady + other → use raw (user accepted/rejected, Claude moved on)
+		case prev == session.StatusPlanReady:
 			next = raw
 		// All other transitions → use raw
 		default:

@@ -8,8 +8,9 @@ const (
 	StatusRunning Status = "running"
 	StatusInput   Status = "input"
 	StatusIdle    Status = "idle"
-	StatusDone    Status = "done"
-	StatusExited  Status = "exited"
+	StatusDone      Status = "done"
+	StatusPlanReady Status = "plan_ready"
+	StatusExited    Status = "exited"
 )
 
 type Session struct {
