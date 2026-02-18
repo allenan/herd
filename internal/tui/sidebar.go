@@ -52,7 +52,7 @@ func (m *SidebarModel) Selected() *session.Session {
 	return &m.sessions[m.cursor]
 }
 
-func (m SidebarModel) View(width, height int, focused bool) string {
+func (m SidebarModel) View(width, height int, focused bool, spinnerFrame string) string {
 	if len(m.sessions) == 0 {
 		if focused {
 			return normalStyle.Render("  No sessions yet.\n  Press n to create one.")
@@ -62,7 +62,7 @@ func (m SidebarModel) View(width, height int, focused bool) string {
 
 	var s string
 	for i, sess := range m.sessions {
-		indicator := statusIndicator(sess.Status)
+		indicator := statusIndicator(sess.Status, spinnerFrame)
 		name := fmt.Sprintf("%s/%s", sess.Project, sess.Name)
 
 		if focused {
@@ -82,15 +82,19 @@ func (m SidebarModel) View(width, height int, focused bool) string {
 	return s
 }
 
-func statusIndicator(status session.Status) string {
+func statusIndicator(status session.Status, spinnerFrame string) string {
 	switch status {
 	case session.StatusRunning:
-		return statusRunning
+		return spinnerFrame
 	case session.StatusIdle:
 		return statusIdle
+	case session.StatusDone:
+		return statusDone
+	case session.StatusInput:
+		return statusInput
 	case session.StatusExited:
 		return statusExited
 	default:
-		return statusRunning
+		return spinnerFrame
 	}
 }

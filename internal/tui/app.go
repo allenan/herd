@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/allenan/herd/internal/tmux"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -14,10 +17,18 @@ const (
 	modePrompt
 )
 
+// claudeSpinner uses the same animation sequence as Claude Code's spinner,
+// with first/last frames duplicated to create a hold/easing effect.
+var claudeSpinner = spinner.Spinner{
+	Frames: []string{"·", "·", "✢", "✳", "✶", "✻", "✽", "✽", "✻", "✶", "✳", "✢"},
+	FPS:    150 * time.Millisecond,
+}
+
 type App struct {
 	mode       mode
 	sidebar    SidebarModel
 	prompt     PromptModel
+	spinner    spinner.Model
 	manager    *tmux.Manager
 	width      int
 	height     int
@@ -31,18 +42,31 @@ func NewApp(manager *tmux.Manager, defaultDir string) App {
 	sidebar.SetSessions(manager.ListSessions())
 	sidebar.SetActive(manager.State.LastActiveSession)
 
+	s := spinner.New()
+	s.Spinner = claudeSpinner
+	s.Style = statusRunningStyle
+
 	return App{
 		mode:       modeNormal,
 		sidebar:    sidebar,
 		prompt:     NewPromptModel(),
+		spinner:    s,
 		manager:    manager,
 		defaultDir: defaultDir,
 		focused:    true,
 	}
 }
 
+type statusTickMsg time.Time
+
+func statusTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+		return statusTickMsg(t)
+	})
+}
+
 func (a App) Init() tea.Cmd {
-	return tea.EnableReportFocus
+	return tea.Batch(tea.EnableReportFocus, statusTick(), a.spinner.Tick)
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -57,6 +81,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BlurMsg:
 		a.focused = false
 		return a, nil
+	case statusTickMsg:
+		changed := a.manager.RefreshStatus()
+		if changed {
+			a.sidebar.SetSessions(a.manager.ListSessions())
+		}
+		return a, statusTick()
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		a.spinner, cmd = a.spinner.Update(msg)
+		return a, cmd
 	}
 
 	switch a.mode {
@@ -131,11 +165,13 @@ func (a App) View() string {
 		title = titleBlurredStyle.Render("🐕 herd")
 	}
 
+	spinnerFrame := a.spinner.View()
+
 	var body string
 	if a.mode == modePrompt {
-		body = a.sidebar.View(a.width, a.height, a.focused) + "\n\n" + a.prompt.View()
+		body = a.sidebar.View(a.width, a.height, a.focused, spinnerFrame) + "\n\n" + a.prompt.View()
 	} else {
-		body = a.sidebar.View(a.width, a.height, a.focused)
+		body = a.sidebar.View(a.width, a.height, a.focused, spinnerFrame)
 	}
 
 	var statusLine string

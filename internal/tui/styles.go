@@ -54,8 +54,9 @@ var (
 			Faint(true).
 			PaddingLeft(1)
 
-	statusRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("*")
-	statusInput   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("!")
-	statusIdle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("o")
-	statusExited  = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("x")
+	statusRunningStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	statusInput        = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("!")
+	statusIdle         = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("●")
+	statusDone         = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render("✓")
+	statusExited       = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("x")
 )
