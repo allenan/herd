@@ -84,13 +84,14 @@ Requires Go 1.24+ and tmux.
 | `d`       | Delete session                |
 | `q`       | Quit (sessions keep running)  |
 
-### Viewport
+### Pane navigation
 
-| Key      | Action                  |
-| -------- | ----------------------- |
-| `Ctrl-]` | Return focus to sidebar |
+| Key                        | Action                |
+| -------------------------- | --------------------- |
+| `Ctrl-h` / `Ctrl-Left`    | Focus sidebar         |
+| `Ctrl-l` / `Ctrl-Right`   | Focus viewport        |
 
-Everything else passes through to Claude Code.
+Mouse click also switches focus. Everything in the viewport passes through to Claude Code.
 
 ## Git worktrees
 

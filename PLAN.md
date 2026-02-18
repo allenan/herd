@@ -339,9 +339,10 @@ Sidebar focused:
   ?                Help overlay
   q                Quit Herd (tmux sessions keep running)
 
-Main pane focused:
-  Ctrl-]           Return focus to sidebar
-                   (only Herd keybinding - everything else passes to Claude Code)
+Pane navigation (works from either pane):
+  Ctrl-h / Ctrl-Left     Focus sidebar
+  Ctrl-l / Ctrl-Right    Focus viewport
+  Mouse click            Focus clicked pane
 ```
 
 ---
@@ -490,7 +491,7 @@ tmux installed automatically as dependency. First run auto-installs Claude Code 
 
 ## Open questions
 
-1. **tmux prefix key**: Dedicated socket isolates from user's tmux, but still need sidebar/main switching. Plan: Ctrl-]. Configurable.
+1. **tmux prefix key**: Dedicated socket isolates from user's tmux, but still need sidebar/main switching. Resolved: Ctrl-h/Ctrl-Left (sidebar) and Ctrl-l/Ctrl-Right (viewport), plus mouse click.
 
 2. **Hook scope**: Global (~/.claude/settings.json) vs per-project. Going with global — one install covers everything, uses $PWD to match sessions.
 
