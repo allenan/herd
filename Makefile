@@ -1,5 +1,7 @@
 BINARY = herd
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOFLAGS = -trimpath
+LDFLAGS = -X github.com/allenan/herd/cmd.Version=$(VERSION)
 PROFILE ?=
 
 # Resolve paths based on profile
@@ -16,7 +18,7 @@ endif
 .PHONY: build clean run kill reload vet
 
 build:
-	go build $(GOFLAGS) -o $(BINARY) .
+	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 run: build
 	./$(BINARY) $(PROFILE_FLAG)

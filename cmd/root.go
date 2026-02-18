@@ -15,6 +15,9 @@ import (
 var sidebarFlag bool
 var profileName string
 
+// Version is set at build time via ldflags.
+var Version = "dev"
+
 var rootCmd = &cobra.Command{
 	Use:   "herd",
 	Short: "TUI manager for multiple Claude Code sessions",
@@ -27,6 +30,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
+	rootCmd.Version = Version
 	rootCmd.Flags().BoolVar(&sidebarFlag, "sidebar", false, "run sidebar TUI (internal)")
 	rootCmd.Flags().MarkHidden("sidebar")
 	rootCmd.PersistentFlags().StringVar(&profileName, "profile", "", "named profile for isolated sessions")

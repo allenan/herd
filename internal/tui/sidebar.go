@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/allenan/herd/internal/session"
 )
@@ -25,6 +26,7 @@ type SidebarModel struct {
 	collapsed map[string]bool
 	cursor    int
 	activeID  string
+	filter    string
 }
 
 func NewSidebarModel() SidebarModel {
@@ -138,8 +140,18 @@ func (m *SidebarModel) rebuildItems() {
 	var groups []projectGroup
 	seen := make(map[string]int)
 
+	filterLower := strings.ToLower(m.filter)
+
 	for i := range m.sessions {
 		s := &m.sessions[i]
+		// Apply search filter: match against display name or project
+		if filterLower != "" {
+			nameLower := strings.ToLower(s.DisplayName())
+			projLower := strings.ToLower(s.Project)
+			if !strings.Contains(nameLower, filterLower) && !strings.Contains(projLower, filterLower) {
+				continue
+			}
+		}
 		if idx, ok := seen[s.Project]; ok {
 			groups[idx].sessions = append(groups[idx].sessions, s)
 		} else {
@@ -215,7 +227,21 @@ func (m *SidebarModel) HasSessions() bool {
 	return len(m.sessions) > 0
 }
 
-func (m SidebarModel) View(width, height int, focused bool, spinnerFrame string) string {
+// SetFilter sets the search filter and rebuilds the visible items.
+func (m *SidebarModel) SetFilter(text string) {
+	m.filter = text
+	m.rebuildItems()
+	if m.cursor >= len(m.items) && len(m.items) > 0 {
+		m.cursor = len(m.items) - 1
+	}
+}
+
+// Filter returns the current filter text.
+func (m *SidebarModel) Filter() string {
+	return m.filter
+}
+
+func (m SidebarModel) View(width, height int, focused bool, spinnerFrame string, termSpinnerFrame string) string {
 	if len(m.sessions) == 0 {
 		if focused {
 			return normalStyle.Render(" No sessions yet.\n Press n to create one.")
@@ -235,7 +261,7 @@ func (m SidebarModel) View(width, height int, focused bool, spinnerFrame string)
 			s += m.renderProject(item.project, isCursor, focused) + "\n"
 		case itemSession:
 			isActive := item.session != nil && item.session.ID == m.activeID
-			s += m.renderSession(item.session, isCursor, focused, isActive, spinnerFrame) + "\n"
+			s += m.renderSession(item.session, isCursor, focused, isActive, spinnerFrame, termSpinnerFrame) + "\n"
 		}
 	}
 	return s
@@ -275,8 +301,8 @@ func truncate(s string, max int) string {
 	return string(runes[:max-1]) + "~"
 }
 
-func (m SidebarModel) renderSession(sess *session.Session, isCursor, focused, isActive bool, spinnerFrame string) string {
-	indicator := statusIndicator(sess, spinnerFrame)
+func (m SidebarModel) renderSession(sess *session.Session, isCursor, focused, isActive bool, spinnerFrame string, termSpinnerFrame string) string {
+	indicator := statusIndicator(sess, spinnerFrame, termSpinnerFrame)
 	name := sess.DisplayName()
 	if sess.Type == session.TypeTerminal {
 		name = "$ " + name
@@ -316,9 +342,12 @@ func (m SidebarModel) renderSession(sess *session.Session, isCursor, focused, is
 	return fmt.Sprintf(" %s %s %s", glyph, indicator, styledName)
 }
 
-func statusIndicator(sess *session.Session, spinnerFrame string) string {
+func statusIndicator(sess *session.Session, spinnerFrame string, termSpinnerFrame string) string {
 	switch sess.Status {
 	case session.StatusRunning:
+		if sess.Type == session.TypeTerminal {
+			return termSpinnerFrame
+		}
 		return spinnerFrame
 	case session.StatusIdle:
 		return statusIdle
@@ -335,6 +364,9 @@ func statusIndicator(sess *session.Session, spinnerFrame string) string {
 	case session.StatusExited:
 		return statusExited
 	default:
+		if sess.Type == session.TypeTerminal {
+			return termSpinnerFrame
+		}
 		return spinnerFrame
 	}
 }

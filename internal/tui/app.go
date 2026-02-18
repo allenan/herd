@@ -18,6 +18,7 @@ type mode int
 const (
 	modeNormal mode = iota
 	modePrompt
+	modeSearch
 )
 
 // claudeSpinner uses the same animation sequence as Claude Code's spinner,
@@ -27,20 +28,30 @@ var claudeSpinner = spinner.Spinner{
 	FPS:    150 * time.Millisecond,
 }
 
+// terminalSpinner is a subtler animation for active terminal sessions,
+// reserving the asterisk animation for Claude Code sessions.
+var terminalSpinner = spinner.Spinner{
+	Frames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+	FPS:    100 * time.Millisecond,
+}
+
 type App struct {
 	mode         mode
 	sidebar      SidebarModel
 	prompt       PromptModel
 	spinner      spinner.Model
+	termSpinner  spinner.Model
 	manager      *tmux.Manager
 	width        int
 	height       int
 	defaultDir   string
 	profileName  string
-	err          string
-	focused      bool
-	waitingPopup bool
-	showHelp     bool
+	err            string
+	focused        bool
+	waitingPopup   bool
+	showHelp       bool
+	pendingDelete  *session.Session
+	searchText     string
 }
 
 func NewApp(manager *tmux.Manager, defaultDir, profileName string) App {
@@ -52,11 +63,16 @@ func NewApp(manager *tmux.Manager, defaultDir, profileName string) App {
 	s.Spinner = claudeSpinner
 	s.Style = statusRunningStyle
 
+	ts := spinner.New()
+	ts.Spinner = terminalSpinner
+	ts.Style = statusRunningStyle
+
 	return App{
 		mode:        modeNormal,
 		sidebar:     sidebar,
 		prompt:      NewPromptModel(),
 		spinner:     s,
+		termSpinner: ts,
 		manager:     manager,
 		defaultDir:  defaultDir,
 		profileName: profileName,
@@ -99,7 +115,7 @@ func checkPopupResult(resultPath string) tea.Cmd {
 }
 
 func (a App) Init() tea.Cmd {
-	return tea.Batch(tea.EnableReportFocus, statusTick(), a.spinner.Tick)
+	return tea.Batch(tea.EnableReportFocus, statusTick(), a.spinner.Tick, a.termSpinner.Tick)
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -122,9 +138,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, statusTick()
 	case spinner.TickMsg:
-		var cmd tea.Cmd
-		a.spinner, cmd = a.spinner.Update(msg)
-		return a, cmd
+		var cmd1, cmd2 tea.Cmd
+		a.spinner, cmd1 = a.spinner.Update(msg)
+		a.termSpinner, cmd2 = a.termSpinner.Update(msg)
+		return a, tea.Batch(cmd1, cmd2)
 	case popupCheckMsg:
 		if a.waitingPopup {
 			return a, checkPopupResult(tmux.PopupResultPath())
@@ -156,6 +173,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch a.mode {
 	case modePrompt:
 		return a.updatePrompt(msg)
+	case modeSearch:
+		return a.updateSearch(msg)
 	default:
 		return a.updateNormal(msg)
 	}
@@ -164,6 +183,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle pending delete confirmation first
+		if a.pendingDelete != nil {
+			switch msg.String() {
+			case "y", "enter":
+				a.manager.KillSession(a.pendingDelete.ID)
+				a.sidebar.SetFilter("")
+				a.sidebar.SetSessions(a.manager.ListSessions())
+				a.sidebar.SetActive(a.manager.State.LastActiveSession)
+				a.err = ""
+			}
+			a.pendingDelete = nil
+			return a, nil
+		}
+
 		// Dismiss help on any key except ? itself
 		if a.showHelp && !key.Matches(msg, keys.Help) {
 			a.showHelp = false
@@ -204,6 +237,7 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				dir = a.defaultDir
 			}
 			a.manager.CreateSession(dir, "New Session")
+			a.sidebar.SetFilter("")
 			a.sidebar.SetSessions(a.manager.ListSessions())
 			a.sidebar.SetActive(a.manager.State.LastActiveSession)
 			a.err = ""
@@ -213,17 +247,45 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleNewTerminal()
 		case key.Matches(msg, keys.Delete):
 			if sel := a.sidebar.Selected(); sel != nil {
-				a.manager.KillSession(sel.ID)
-				a.sidebar.SetSessions(a.manager.ListSessions())
-				a.sidebar.SetActive(a.manager.State.LastActiveSession)
-				a.err = ""
+				a.pendingDelete = sel
 			}
+		case key.Matches(msg, keys.Search):
+			a.mode = modeSearch
+			a.searchText = ""
+			a.sidebar.SetFilter("")
 		case key.Matches(msg, keys.Mute):
 			if a.manager.Notifier != nil {
 				a.manager.Notifier.SetMuted(!a.manager.Notifier.IsMuted())
 			}
 		case key.Matches(msg, keys.Help):
 			a.showHelp = !a.showHelp
+		}
+	}
+	return a, nil
+}
+
+func (a App) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEscape:
+			a.mode = modeNormal
+			a.searchText = ""
+			a.sidebar.SetFilter("")
+			return a, nil
+		case tea.KeyEnter:
+			a.mode = modeNormal
+			return a, nil
+		case tea.KeyBackspace:
+			if len(a.searchText) > 0 {
+				a.searchText = a.searchText[:len(a.searchText)-1]
+				a.sidebar.SetFilter(a.searchText)
+			}
+			return a, nil
+		case tea.KeyRunes:
+			a.searchText += string(msg.Runes)
+			a.sidebar.SetFilter(a.searchText)
+			return a, nil
 		}
 	}
 	return a, nil
@@ -402,11 +464,12 @@ func (a App) renderHelp() string {
 		hintStyle.Render("j/k    navigate"),
 		hintStyle.Render("enter  switch"),
 		hintStyle.Render("space  collapse"),
+		hintStyle.Render("/      search"),
 		hintStyle.Render("n      new session"),
 		hintStyle.Render("N      new project"),
 		hintStyle.Render("w      worktree"),
 		hintStyle.Render("t      terminal"),
-		hintStyle.Render("d      delete"),
+		hintStyle.Render("d      delete (confirms)"),
 		hintStyle.Render("m      mute"),
 		hintStyle.Render("q      quit"),
 		hintStyle.Render("?      close"),
@@ -430,18 +493,26 @@ func (a App) View() string {
 	}
 
 	spinnerFrame := a.spinner.View()
+	termSpinnerFrame := a.termSpinner.View()
 
 	var body string
 	if a.mode == modePrompt {
-		body = a.sidebar.View(a.width, a.height, a.focused, spinnerFrame) + "\n\n" + a.prompt.View()
+		body = a.sidebar.View(a.width, a.height, a.focused, spinnerFrame, termSpinnerFrame) + "\n\n" + a.prompt.View()
 	} else {
-		body = a.sidebar.View(a.width, a.height, a.focused, spinnerFrame)
+		body = a.sidebar.View(a.width, a.height, a.focused, spinnerFrame, termSpinnerFrame)
 	}
 
 	var statusLine string
 	if a.focused {
-		if a.showHelp {
+		if a.pendingDelete != nil {
+			name := a.pendingDelete.DisplayName()
+			statusLine = deleteConfirmStyle.Render("delete \""+name+"\"? y/n")
+		} else if a.mode == modeSearch {
+			statusLine = searchStyle.Render("/ " + a.searchText + "█")
+		} else if a.showHelp {
 			statusLine = a.renderHelp()
+		} else if a.sidebar.Filter() != "" {
+			statusLine = searchStyle.Render("/ "+a.sidebar.Filter()) + "  " + statusBarStyle.PaddingTop(0).Render("? shortcuts")
 		} else {
 			statusLine = statusBarStyle.Render("? shortcuts")
 		}

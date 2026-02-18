@@ -100,4 +100,16 @@ var (
 	// Active session name style when sidebar is unfocused
 	activeStyle = lipgloss.NewStyle().
 			Foreground(colorText)
+
+	// Search prompt style
+	searchStyle = lipgloss.NewStyle().
+			Foreground(colorAccent).
+			Bold(true).
+			PaddingLeft(1)
+
+	// Delete confirmation style
+	deleteConfirmStyle = lipgloss.NewStyle().
+				Foreground(colorWarning).
+				Bold(true).
+				PaddingLeft(1)
 )
