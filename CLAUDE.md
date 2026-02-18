@@ -41,12 +41,12 @@ The sidebar subprocess (`herd --sidebar`) runs the interactive TUI. It communica
 
 ### Session lifecycle (pane-swapping)
 
-Sessions are tmux windows created with `tmux new-window -d` running `claude`. Switching sessions uses `tmux swap-pane` to move the selected session's pane into the viewport position. The viewport pane is resolved dynamically via `resolveViewportPane()` rather than relying on a stored pane ID.
+Sessions are tmux windows created with `tmux new-window -d` running either `claude` (Claude sessions) or `$SHELL` (terminal sessions). Both types share the same CRUD, pane-swap, and reconciliation lifecycle — distinguished by a `Type` field on the Session struct (`""` for Claude, `"terminal"` for terminals). Switching sessions uses `tmux swap-pane` to move the selected session's pane into the viewport position. The viewport pane is resolved dynamically via `resolveViewportPane()` rather than relying on a stored pane ID.
 
 ### Key packages
 
 - **`cmd/`** — Cobra commands. `root.go` handles main launch + `--sidebar` flag dispatch + profile resolution. `sidebar.go` starts the Bubble Tea program. `popup.go` and `popup_worktree.go` are hidden subcommands spawned by the TUI for tmux `display-popup` flows.
-- **`internal/tmux/`** — All tmux interaction. `server.go` manages the socket/server lifecycle (profile-aware). `layout.go` creates the two-pane split with terminal capability negotiation. `manager.go` contains session CRUD (create, switch, kill) using pane-swap strategy. `capture.go` handles pane content/title capture and status detection. `popup.go` provides tmux `display-popup` helpers.
+- **`internal/tmux/`** — All tmux interaction. `server.go` manages the socket/server lifecycle (profile-aware). `layout.go` creates the two-pane split with terminal capability negotiation. `manager.go` contains session CRUD (create, switch, kill) using pane-swap strategy — includes `CreateTerminal()` for terminal sessions and split `RefreshStatus()` dispatching to `refreshClaudeStatus()`/`refreshTerminalStatus()`. `capture.go` handles pane content/title capture, Claude status detection, and terminal status detection (`DetectTerminalStatus`). `portdetect.go` detects listening TCP ports via process tree walking (`pgrep`) + `lsof`. `popup.go` provides tmux `display-popup` helpers.
 - **`internal/tui/`** — Bubble Tea UI. `app.go` is the top-level model with normal/prompt modes, popup launching, and help overlay. `sidebar.go` renders the tree view with project grouping. `prompt.go` handles legacy inline prompts (fallback for tmux < 3.2). `popup.go` contains the directory picker and worktree branch picker popup models. `dirpicker.go` provides tab-completion utilities. `keybindings.go` and `styles.go` define key mappings and lipgloss styling.
 - **`internal/session/`** — Data types and persistence. `store.go` handles JSON state read/write with atomic rename and backup. `project.go` detects git project name and branch from a directory. `reconcile.go` adopts orphan tmux panes and prunes dead sessions.
 - **`internal/profile/`** — Profile management. `profile.go` resolves profile by name, creates directory structure, and manages per-profile config (including `CLAUDE_CONFIG_DIR`).
@@ -78,7 +78,11 @@ The `internal/tmux` package is imported as `htmux` in `cmd/` to avoid collision 
 
 ## Status indicators
 
-Animated spinner (running), `!` (needs input), `●` (idle), `✓` (done), `x` (exited) — defined as styled strings in `internal/tui/styles.go`.
+**Claude sessions**: Animated spinner (running), `!` (needs input), `●` (idle), `✓` (done), `x` (exited).
+
+**Terminal sessions**: `●` gray (shell idle), animated spinner (command running), `◉` green (service listening on a TCP port), `x` (exited).
+
+All defined as styled strings in `internal/tui/styles.go`. Terminal status is detected via `pane_current_command` (process name) rather than content pattern-matching. Port detection walks the pane's process tree with `pgrep` and checks `lsof` for TCP LISTEN sockets.
 
 ## Key invariants
 
@@ -114,6 +118,8 @@ See `PLAN.md` for the full roadmap. Current status by phase:
 
 **Phase 3.5 (Profiles) — Complete.** Multiple isolated herd instances via `--profile <name>`. Each profile gets its own tmux server, state file, socket, and optionally a custom `CLAUDE_CONFIG_DIR`. Default (no profile flag) is backward compatible with `~/.herd/`.
 
+**Phase 3.6 (Terminals) — Complete.** Project-scoped terminal sessions (`t` key). Session struct extended with `Type` field (`""`/`"terminal"`) and `ServicePort`. Terminal status detected via `pane_current_command` (shell idle vs command running) + port detection via `pgrep`/`lsof` (service listening). Sidebar shows terminals after Claude sessions with `$ ` prefix and total counts. No popup needed — instant shell creation in project directory. Orphan terminals are not auto-adopted (indistinguishable from random tmux panes); dead panes still pruned by existing logic.
+
 **Phase 4 (Ship) — Partially started.** Done: `README.md` (comprehensive, includes features, keybindings, worktrees, profiles). Missing: `.goreleaser.yml`, `.github/workflows/`, Homebrew tap, `--version` flag.
 
 ### Divergences from PLAN.md
@@ -124,3 +130,4 @@ See `PLAN.md` for the full roadmap. Current status by phase:
 - **Status glyphs differ from plan**: Plan said `o` for idle, implementation uses `●` (gray). Plan said `*` for running, implementation uses an animated spinner.
 - **Popup UI**: Plan had inline prompts. Implementation uses tmux `display-popup` with a fallback to inline prompts for tmux < 3.2.
 - **Profiles**: Not in the original plan. Fully implemented as Phase 3.5 — enables multi-account/multi-config isolated instances.
+- **Terminals**: Not in the original plan. Fully implemented as Phase 3.6 — project-scoped scratch terminals with smart status detection (idle/running/service).
