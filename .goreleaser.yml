@@ -1,0 +1,42 @@
+version: 2
+project_name: herd
+
+builds:
+  - main: .
+    binary: herd
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/allenan/herd/cmd.Version={{.Version}}
+    flags:
+      - -trimpath
+
+brews:
+  - repository:
+      owner: allenan
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/allenan/herd"
+    description: "TUI manager for multiple Claude Code sessions"
+    license: "MIT"
+    dependencies:
+      - name: tmux
+    install: |
+      bin.install "herd"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/herd --version")
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+release:
+  github:
+    owner: allenan
+    name: herd
