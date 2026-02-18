@@ -56,6 +56,7 @@ var (
 	statusIdle         = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("●")
 	statusDone         = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render("✓")
 	statusExited       = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("x")
+	statusService      = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("◉")
 
 	// Project header styles
 	projectHeaderStyle = lipgloss.NewStyle().

@@ -92,6 +92,32 @@ func DetectAllStatuses(sessions []session.Session) bool {
 	return changed
 }
 
+// shellCommands are process names that indicate an idle shell prompt.
+var shellCommands = map[string]bool{
+	"bash": true, "zsh": true, "fish": true, "sh": true,
+	"dash": true, "tcsh": true, "ksh": true,
+}
+
+// DetectTerminalStatus classifies a terminal pane's current state by
+// inspecting its pane_current_command. Returns StatusShell for idle shells,
+// StatusRunning for active commands, or StatusExited for dead panes.
+func DetectTerminalStatus(paneID string) (session.Status, string) {
+	if !paneExists(paneID) {
+		return session.StatusExited, ""
+	}
+
+	cmd, err := TmuxRunOutput("display-message", "-p", "-t", paneID, "#{pane_current_command}")
+	if err != nil {
+		return session.StatusExited, ""
+	}
+	cmd = strings.TrimSpace(cmd)
+
+	if shellCommands[cmd] {
+		return session.StatusShell, ""
+	}
+	return session.StatusRunning, cmd
+}
+
 // noisePatterns are pane titles that carry no useful information and should
 // be treated as empty (so DisplayName falls back to the session Name).
 var noisePatterns = []string{
