@@ -4,13 +4,13 @@ A TUI for managing multiple Claude Code sessions, grouped by project, with input
 
 ```
 +----------------+---------------------------------------+
-|  v omix        |                                       |
-|    * refactor  |   $ claude                            |
-|    ! mktg      |   > I've updated the pricing page...  |
-|  v mtrail      |                                       |
-|    * combat    |                                       |
-|    o tiles     |                                       |
-|  > helium      |                                       |
+|  v project-1   |                                       |
+|    * feature-a |   $ claude                            |
+|    ! feature-b |   > I've updated the pricing page...  |
+|  v project-2   |                                       |
+|    * feature-c |                                       |
+|    o feature-d |                                       |
+|  > project-3   |                                       |
 |                |                                       |
 |  [n]ew [q]uit  |                                       |
 +----------------+---------------------------------------+
@@ -36,8 +36,8 @@ Herd is a **single Go binary** that orchestrates everything. It uses **tmux** as
 |         |  tmux control protocol (CLI)      |
 |         +---------------+                   |
 |                                             |
-|  ~/.config/herd/state.json  <- session meta  |
-|  Claude Code hooks         <- notifications |
+|  ~/.herd/state.json       <- session meta   |
+|  tmux capture-pane        <- notifications  |
 +---------------------------------------------+
 ```
 
@@ -61,138 +61,87 @@ Herd is a **single Go binary** that orchestrates everything. It uses **tmux** as
 
 ```bash
 $ herd
+$ herd --profile work    # isolated instance with separate config
 ```
 
 On first run:
 1. Check tmux is installed (error with install instructions if not)
-2. Create a dedicated tmux server: `tmux -L herd new-session -d -s herd-main`
-   - Using `-L herd` gives us our own tmux socket, isolated from the user's normal tmux usage
-3. Create the two-pane layout: sidebar (left, 20%) + main pane (right, 80%)
-4. Sidebar pane runs the Bubble Tea TUI (re-execs itself: `herd --sidebar`)
-5. Main pane is empty, waiting for session selection or creation
-6. Load state from `~/.config/herd/state.json` if it exists (recover from previous run)
+2. Resolve profile (default `~/.herd/` or named `~/.herd/profiles/<name>/`)
+3. Create a dedicated tmux server via Unix socket at `~/.herd/tmux.sock`
+4. Create the two-pane layout: sidebar (left, 32 chars) + main pane (right, flexible)
+5. Sidebar pane runs the Bubble Tea TUI (re-execs itself: `herd --sidebar`)
+6. Load state from `~/.herd/state.json` if it exists (recover from previous run)
+7. Reconcile state against live tmux panes (adopt orphans, prune dead)
 
-On subsequent runs, if the tmux server `herd` is already running, reattach to it.
+On subsequent runs, if the tmux server is already running, reattach to it.
 
 ### 2. User creates a new Claude Code session
 
-User presses `n` (new) in the sidebar. Herd prompts inline:
+User presses `n` (new) in the sidebar. Herd opens a tmux popup (or inline prompt for tmux < 3.2):
 
 ```
-Directory: ~/code/omix      (default: cwd, tab-complete)
-Name: marketing-page        (default: current git branch)
-Worktree? [y/N]
+Directory: ~/code/project-1      (tab-complete, auto-detects project)
 ```
+
+The session name is auto-derived from Claude Code's terminal title via OSC polling. For worktrees, `w` opens a branch name picker with path preview.
 
 Then Herd does:
 
 ```go
-func (m *Manager) CreateSession(dir, name string, worktree bool) {
+func (m *Manager) CreateSession(dir, name string) {
     project := detectProject(dir) // git rev-parse --show-toplevel | basename
 
-    if worktree {
-        wtDir := filepath.Join(dir, ".worktrees", name)
-        exec("git", "worktree", "add", "-b", name, wtDir)
-        dir = wtDir
-    }
-
-    // Create a new tmux window in our server
-    windowID := tmux.NewWindow(tmux.WindowOpts{
-        Name:           fmt.Sprintf("%s/%s", project, name),
-        StartDirectory: dir,
-        Command:        "claude",
-    })
+    // Create a new tmux window running claude
+    paneID := tmux.NewWindow(...)
 
     // Store metadata
     session := Session{
         ID:         uuid.New(),
-        WindowID:   windowID,
+        TmuxPaneID: paneID,
         Project:    project,
         Name:       name,
         Dir:        dir,
-        IsWorktree: worktree,
         CreatedAt:  time.Now(),
         Status:     StatusRunning,
     }
     m.state.Sessions = append(m.state.Sessions, session)
     m.state.Save()
+}
 
-    m.installHookIfNeeded()
+func (m *Manager) CreateWorktreeSession(repoRoot, project, branch string) {
+    // git worktree add -b <branch> <repo>/.worktrees/<branch>
+    wtDir := worktree.Create(repoRoot, branch)
+
+    // Create session in worktree directory
+    // Tags session with IsWorktree=true, WorktreeBranch=branch
 }
 ```
 
-### 3. Input detection (the bell icon)
+### 3. Input detection
 
-Two complementary approaches — Herd uses both:
-
-#### Primary: Claude Code Notification Hook
-
-Claude Code has a built-in `Notification` hook event that fires when Claude is waiting for user input (permission prompts, idle prompts, questions). Herd installs a global hook that writes to a **Unix domain socket** that the Herd process listens on.
-
-Installed by `herd hook install` into `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "Notification": [
-      {
-        "type": "command",
-        "command": "herd notify",
-        "timeout": 5
-      }
-    ]
-  }
-}
-```
-
-`herd notify` is a subcommand in the same binary:
+Herd polls pane content every 2 seconds via `tmux capture-pane`:
 
 ```go
-func notifyCmd() {
-    input := readStdin()  // Claude Code pipes JSON with session info
-    parsed := parseHookInput(input)
-
-    conn, _ := net.Dial("unix", socketPath())
-    msg := NotifyMessage{
-        Type:    parsed.Type, // "permission" | "idle_prompt" | "ask_user"
-        Dir:     parsed.SessionCwd,
-        Message: parsed.Title,
-    }
-    json.NewEncoder(conn).Encode(msg)
+func DetectStatus(content string) Status {
+    // Priority order:
+    // 1. "esc to interrupt" → Running (Claude is generating)
+    // 2. "Do you want to", "[Y/n]", "Allow once", etc. → Input (permission prompt)
+    // 3. "? for shortcuts" → Idle (waiting for user task)
+    // 4. Running→Idle while not in viewport → Done (finished unattended)
 }
 ```
 
-Herd matches the notification to a session by working directory and shows the bell icon. Response time: near-instant.
-
-#### Fallback: Screen scraping via `tmux capture-pane`
-
-For resilience, Herd also polls pane content every 2 seconds:
-
-```go
-func needsInput(output string) bool {
-    patterns := []string{
-        "Do you want to",
-        "[Y/n]", "[y/N]",
-        "Allow once", "Allow always",
-    }
-    for _, p := range patterns {
-        if strings.Contains(output, p) {
-            return true
-        }
-    }
-    return false
-}
-```
+Additionally, `StatusDone` is set when a session transitions from Running to Idle while not in the viewport — "Claude finished while you weren't looking".
 
 ### 4. Switching sessions
 
-`j`/`k` to navigate, `Enter` to switch. Herd tells tmux to display the selected window:
+`j`/`k` to navigate, `Enter` to switch. Herd swaps the selected session's pane into the viewport:
 
 ```go
-func (m *Manager) switchTo(session Session) {
-    tmux.SelectWindow(session.WindowID)
-    m.activeSession = session.ID
-    session.Status = StatusRunning // clear notification
+func (m *Manager) SwitchTo(session Session) {
+    viewportPane := m.resolveViewportPane()  // dynamically discover
+    tmux.SwapPane(session.TmuxPaneID, viewportPane)
+    m.state.LastActiveSession = session.ID
     m.state.Save()
 }
 ```
@@ -213,16 +162,15 @@ func detectProject(dir string) string {
 
 Sidebar tree:
 ```
-v omix           (2 sessions)
-  * refactor     Running
-  ! marketing   Needs input
-v monster-trail  (2 sessions)
-  * combat       Running
-  o tiles        Idle
-> helium         (1 session, collapsed)
+▼ project-1                     (2)
+    ● feature-a                       ← Running (animated spinner)
+  ! feature-b                         ← Needs input
+▼ project-2                     (1)
+  ✓ feature-c                         ← Done
+> project-3                     (1)   ← Collapsed
 ```
 
-Status indicators: `*` Running, `!` Needs input, `o` Idle, `x` Exited/crashed
+Status indicators: spinner Running, `!` Needs input, `●` Idle, `✓` Done, `x` Exited/crashed
 
 ---
 
@@ -232,61 +180,58 @@ Status indicators: `*` Running, `!` Needs input, `o` Idle, `x` Exited/crashed
 herd/
   main.go                    # Entry point, Cobra root command
   cmd/
-    root.go                  # `herd` - TUI launch (default)
+    root.go                  # `herd` - TUI launch + --sidebar dispatch + profile resolution
     sidebar.go               # `herd --sidebar` - runs Bubble Tea in left pane
-    notify.go                # `herd notify` - hook callback subcommand
-    new.go                   # `herd new` - create session headlessly
-    list.go                  # `herd list` - list sessions for scripting
-    hook.go                  # `herd hook install|uninstall`
-    cleanup.go               # `herd cleanup` - prune dead sessions
+    popup.go                 # `herd popup-new` - directory picker popup (hidden)
+    popup_worktree.go        # `herd popup-worktree` - branch picker popup (hidden)
   internal/
+    profile/
+      profile.go             # Profile resolution, config, path management
     tui/
-      app.go                 # Top-level Bubble Tea model
-      sidebar.go             # Tree view component
-      prompt.go              # Inline prompts (new session, rename)
+      app.go                 # Top-level Bubble Tea model (normal/prompt modes, popup launching)
+      sidebar.go             # Tree view component (project grouping, collapse/expand)
+      prompt.go              # Legacy inline prompts (fallback for tmux < 3.2)
+      popup.go               # Directory picker + worktree popup models
+      dirpicker.go           # Tab-completion utilities
       keybindings.go         # Key mapping definitions
-      styles.go              # Lip Gloss theme
+      styles.go              # Lip Gloss theme + status indicator styles
     tmux/
-      server.go              # Server bootstrap (create/find -L herd server)
-      manager.go             # Window lifecycle (create, kill, select)
-      capture.go             # Pane capture + input pattern matching
-      layout.go              # Two-pane layout setup
+      server.go              # Server bootstrap (profile-aware socket management)
+      manager.go             # Session lifecycle (create, switch, kill, reconcile, status refresh)
+      capture.go             # Pane capture + status pattern matching + title cleaning
+      layout.go              # Two-pane layout setup + terminal capabilities
+      popup.go               # tmux display-popup helpers (version check, spawn)
     session/
-      session.go             # Session struct, status enum
-      store.go               # JSON persistence (~/.config/herd/state.json)
-      project.go             # Git-based project detection
-      reconcile.go           # Sync state.json with live tmux state
+      session.go             # Session struct, status enum, DisplayName()
+      store.go               # JSON persistence (~/.herd/state.json) with atomic writes
+      project.go             # Git-based project/branch detection
+      reconcile.go           # Sync state.json with live tmux state (orphan adoption, pruning)
     worktree/
-      worktree.go            # Git worktree create/remove
-      cleanup.go             # Orphan worktree pruning
-    hooks/
-      installer.go           # Read/modify ~/.claude/settings.json
-      listener.go            # Unix socket server for hook notifications
-    notify/
-      desktop.go             # OS-native notifications (osascript / notify-send)
-  .goreleaser.yml
-  .github/workflows/
-    release.yml              # GoReleaser on tag push
+      worktree.go            # Git worktree create/remove/detect
   go.mod
   go.sum
+  Makefile                   # Profile-aware build targets
   README.md
+  PLAN.md
+  CLAUDE.md
 ```
 
 ---
 
 ## State management
 
-`~/.config/herd/state.json`:
+`~/.herd/state.json`:
 
 ```json
 {
   "sessions": [
     {
       "id": "a1b2c3d4",
-      "tmux_window_id": "@3",
-      "project": "omix",
-      "name": "marketing-page",
-      "dir": "/Users/andrew/code/omix",
+      "tmux_pane_id": "%5",
+      "project": "project-1",
+      "name": "feature-a",
+      "title": "feature-a",
+      "dir": "/home/user/code/project-1",
       "is_worktree": false,
       "worktree_branch": "",
       "created_at": "2026-02-17T10:30:00Z",
@@ -294,33 +239,53 @@ herd/
     }
   ],
   "tmux_socket": "herd",
-  "last_active_session": "a1b2c3d4"
+  "last_active_session": "a1b2c3d4",
+  "viewport_pane_id": "%2",
+  "sidebar_pane_id": "%1"
 }
 ```
 
-**Reconciliation on startup**: Reads state, queries tmux for live windows. Dead windows get marked exited. Orphan windows get adopted with best-effort project detection.
+**Reconciliation on startup**: Reads state, queries tmux for live panes. Dead panes get pruned. Orphan claude panes get adopted with best-effort project detection. Worktree sessions auto-tagged.
 
 ---
 
 ## Git worktree integration
 
 ```go
-func CreateWorktree(repoDir, branchName string) (string, error) {
-    wtDir := filepath.Join(repoDir, ".worktrees", branchName)
-    cmd := exec.Command("git", "-C", repoDir, "worktree", "add", "-b", branchName, wtDir)
-    if err := cmd.Run(); err != nil {
-        return "", fmt.Errorf("git worktree add: %w", err)
-    }
+func Create(repoDir, branchName string) (string, error) {
+    wtDir := WorktreeDir(repoDir, branchName) // <repo>/.worktrees/<sanitized-branch>
+    // Try git worktree add -b <branch> <dir> (new branch)
+    // Fallback to git worktree add <dir> <branch> (existing branch)
     return wtDir, nil
 }
 
-func RemoveWorktree(repoDir, wtDir string) error {
+func Remove(repoDir, wtDir string) error {
+    exec.Command("git", "-C", repoDir, "worktree", "remove", "--force", wtDir).Run()
     exec.Command("git", "-C", repoDir, "worktree", "prune").Run()
-    return exec.Command("git", "-C", repoDir, "worktree", "remove", wtDir).Run()
+    return nil
 }
 ```
 
-Deleting a worktree session (`d`): kill tmux window -> `git worktree remove` -> prompt to delete branch -> remove from state.
+Deleting a worktree session (`d`): swap replacement into viewport (if active) → kill tmux pane → `git worktree remove --force` → prune → remove from state.
+
+---
+
+## Profiles
+
+Profiles enable multiple isolated herd instances (e.g., personal vs work Claude accounts):
+
+```bash
+herd                    # default profile (~/.herd/)
+herd --profile work     # named profile (~/.herd/profiles/work/)
+```
+
+Each profile gets:
+- Its own tmux server and socket
+- Its own state.json
+- Its own session name (e.g., `herd-work-main`)
+- Optionally, a custom `CLAUDE_CONFIG_DIR` (for separate Claude accounts)
+
+Profiles are managed by `internal/profile/profile.go`. Names are validated with `^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`.
 
 ---
 
@@ -329,12 +294,11 @@ Deleting a worktree session (`d`): kill tmux window -> `git worktree remove` -> 
 ```
 Sidebar focused:
   j/k, up/down    Navigate
-  Enter            Switch to session (focuses main pane)
-  n                New session
+  Enter            Switch to session / expand project
+  n                New session (in current project or pick directory)
+  N                New session (always picks directory)
   w                New session with git worktree
-  d                Delete session (confirmation prompt)
-  r                Rename session
-  /                Fuzzy search
+  d                Delete session
   Space            Collapse/expand project group
   ?                Help overlay
   q                Quit Herd (tmux sessions keep running)
@@ -400,7 +364,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: actions/setup-go@v5
-        with: { go-version: '1.22' }
+        with: { go-version: '1.24' }
       - uses: goreleaser/goreleaser-action@v6
         with: { args: 'release --clean' }
         env:
@@ -415,88 +379,99 @@ brew install herd
 herd
 ```
 
-tmux installed automatically as dependency. First run auto-installs Claude Code hook. Done.
+tmux installed automatically as dependency. Done.
 
 ---
 
 ## Implementation phases
 
-### Phase 1: Walking skeleton (3-4 days)
+### Phase 1: Walking skeleton — Complete
 
 **Delivers**: Launch herd, sidebar appears, create sessions, switch between them.
 
-| Task | File(s) | Notes |
-|------|---------|-------|
-| Project init | go.mod, main.go | bubbletea, lipgloss, bubbles, cobra, gotmux |
-| Tmux server bootstrap | internal/tmux/server.go | Create/find `-L herd` server |
-| Two-pane layout | internal/tmux/layout.go | Left 20% sidebar, right 80% main |
-| Session struct + store | internal/session/ | JSON read/write to ~/.config/herd/ |
-| Bubble Tea skeleton | internal/tui/app.go | Model with sidebar list, status bar |
-| Sidebar (flat list) | internal/tui/sidebar.go | No grouping yet |
-| Create session | internal/tmux/manager.go | New tmux window running `claude` |
-| Switch session | internal/tmux/manager.go | select-window on Enter |
-| CLI commands | cmd/root.go, cmd/sidebar.go | herd launches tmux, herd --sidebar runs TUI |
+| Task | File(s) | Status |
+|------|---------|--------|
+| Project init | go.mod, main.go | ✅ Done |
+| Tmux server bootstrap | internal/tmux/server.go | ✅ Done |
+| Two-pane layout | internal/tmux/layout.go | ✅ Done |
+| Session struct + store | internal/session/ | ✅ Done |
+| Bubble Tea skeleton | internal/tui/app.go | ✅ Done |
+| Sidebar (flat list) | internal/tui/sidebar.go | ✅ Done |
+| Create session | internal/tmux/manager.go | ✅ Done |
+| Switch session | internal/tmux/manager.go | ✅ Done |
+| CLI commands | cmd/root.go, cmd/sidebar.go | ✅ Done |
 
-**Test**: Open herd, press `n` three times in different repos, j/k + Enter to switch.
-
-### Phase 2: Grouping + notifications (2-3 days)
+### Phase 2: Grouping + notifications — Complete
 
 **Delivers**: Project tree in sidebar. Bell when Claude needs input.
 
-| Task | File(s) | Notes |
-|------|---------|-------|
-| Project detection | internal/session/project.go | git rev-parse --show-toplevel |
-| Tree view | internal/tui/sidebar.go | Group by project, collapse/expand |
-| Pane polling | internal/tmux/capture.go | capture-pane every 2s, pattern match |
+| Task | File(s) | Status |
+|------|---------|--------|
+| Project detection | internal/session/project.go | ✅ Done |
+| Tree view | internal/tui/sidebar.go | ✅ Done |
+| Pane polling | internal/tmux/capture.go | ✅ Done (every 2s) |
+| Status indicators | internal/tui/sidebar.go, styles.go | ✅ Done |
+| Title capture | internal/tmux/capture.go | ✅ Done (OSC polling) |
 | ~~Hook installer~~ | ~~internal/hooks/installer.go~~ | Deferred — polling works well enough |
 | ~~Socket listener~~ | ~~internal/hooks/listener.go~~ | Deferred — nice-to-have for lower latency |
 | ~~Notify subcommand~~ | ~~cmd/notify.go~~ | Deferred |
-| Status indicators | internal/tui/sidebar.go | Based on session state |
 | ~~Desktop notifications~~ | ~~internal/notify/desktop.go~~ | Deferred — users can configure independently in ~/.claude/settings.json |
 
-**Test**: Two sessions. Trigger permission prompt in one. Bell appears in sidebar within 2s (polling). Switch to it, approve, bell clears.
+### Phase 3: Worktrees + polish — Substantially complete
 
-### Phase 3: Worktrees + polish (2-3 days)
+**Delivers**: Git worktree sessions. Full session lifecycle. Popup UIs.
 
-**Delivers**: Git worktree sessions. Full session lifecycle. Fuzzy search.
+| Task | File(s) | Status |
+|------|---------|--------|
+| Worktree create/remove | internal/worktree/worktree.go | ✅ Done |
+| `w` keybinding | tui/keybindings.go, tui/app.go | ✅ Done |
+| Worktree popup UI | tui/popup.go, cmd/popup_worktree.go | ✅ Done |
+| Delete session (`d`) | tui/app.go, tmux/manager.go | ✅ Done (includes worktree cleanup) |
+| State reconciliation | session/reconcile.go | ✅ Done (orphan adoption, dead pruning, worktree tagging) |
+| Popup directory picker | tui/popup.go, cmd/popup.go | ✅ Done (with tab-completion, inline fallback) |
+| `N` keybinding (new project) | tui/keybindings.go | ✅ Done |
+| Help overlay (`?`) | tui/app.go | ✅ Done |
+| ~~Rename session (`r`)~~ | — | Not needed — names auto-derived from Claude Code tab title |
+| Fuzzy search (`/`) | tui/sidebar.go | Deferred (nice-to-have) |
+| `herd list --json` | cmd/list.go | Deferred |
+| `herd new` | cmd/new.go | Deferred |
 
-| Task | File(s) | Notes |
-|------|---------|-------|
-| Worktree create/remove | internal/worktree/ | git worktree add/remove |
-| `w` keybinding | keybindings.go | New-with-worktree flow |
-| ~~Delete session (`d`)~~ | ~~tui/prompt.go~~ | Done — kills pane, removes from state, handles viewport swap. Confirmation prompt is a nice-to-have. |
-| ~~Rename session (`r`)~~ | ~~tui/prompt.go~~ | Not needed — names auto-derived from Claude Code tab title |
-| Fuzzy search (`/`) | tui/sidebar.go | Filter tree with text input |
-| ~~State reconciliation~~ | ~~session/reconcile.go~~ | Done — backup on save, corrupt recovery in LoadState, orphan adoption via Reconcile() on startup + every 2s poll. |
-| `herd list --json` | cmd/list.go | For status bar integration |
-| `herd new` | cmd/new.go | Headless session creation |
+### Phase 3.5: Profiles — Complete
 
-**Test**: Create worktree session, verify isolated branch. Delete, verify cleanup. Kill herd, restart, sessions reconnect.
+**Delivers**: Multiple isolated herd instances for different Claude accounts/configs.
 
-### Phase 4: Ship (1-2 days)
+| Task | File(s) | Status |
+|------|---------|--------|
+| Profile struct + resolution | internal/profile/profile.go | ✅ Done |
+| Per-profile paths (state, socket, log) | internal/profile/profile.go | ✅ Done |
+| Per-profile tmux session name | internal/profile/profile.go | ✅ Done |
+| CLAUDE_CONFIG_DIR support | internal/profile/profile.go, tmux/server.go | ✅ Done |
+| --profile flag on all commands | cmd/root.go, cmd/sidebar.go, cmd/popup*.go | ✅ Done |
+| Makefile PROFILE variable | Makefile | ✅ Done |
+
+### Phase 4: Ship — Partially started
 
 **Delivers**: brew install works. README is good.
 
-| Task | Notes |
-|------|-------|
-| .goreleaser.yml | Test with `goreleaser release --snapshot` |
-| homebrew-tap repo | Create on GitHub |
-| Release workflow | .github/workflows/release.yml |
-| README | Usage, screenshots, demo GIF (use `vhs` for recording) |
-| First-run experience | Auto hook install, welcome text |
-| --version, --help | Polish |
-| Tag v0.1.0 | Push, verify full pipeline |
+| Task | Status |
+|------|--------|
+| README | ✅ Done (comprehensive, covers features/keybindings/worktrees/profiles) |
+| .goreleaser.yml | Not started |
+| homebrew-tap repo | Not started |
+| Release workflow | Not started |
+| --version, --help | Not started |
+| Tag v0.1.0 | Not started |
 
 ---
 
 ## Open questions
 
-1. **tmux prefix key**: Dedicated socket isolates from user's tmux, but still need sidebar/main switching. Resolved: Ctrl-h/Ctrl-Left (sidebar) and Ctrl-l/Ctrl-Right (viewport), plus mouse click.
+1. ~~**tmux prefix key**~~: Resolved — Ctrl-h/Ctrl-Left (sidebar) and Ctrl-l/Ctrl-Right (viewport), plus mouse click. Dedicated socket isolates from user's tmux.
 
-2. **Hook scope**: Global (~/.claude/settings.json) vs per-project. Going with global — one install covers everything, uses $PWD to match sessions.
+2. **Hook scope**: Global (~/.claude/settings.json) vs per-project. Going with global — one install covers everything, uses $PWD to match sessions. (Hooks not yet implemented — polling is sufficient.)
 
 3. **Session limit / scrolling**: Bubble Tea viewport handles scrolling natively. Fine up to ~100 sessions.
 
-4. **Config file**: Skip at Phase 1. Add ~/.config/herd/config.toml when customization is requested.
+4. ~~**Config file**~~: Resolved — `~/.herd/config.json` stores per-profile config (currently `CLAUDE_CONFIG_DIR`).
 
-5. **Multi-repo worktrees**: Default puts worktrees in `<repo>/.worktrees/`. Make configurable later.
+5. ~~**Multi-repo worktrees**~~: Resolved — worktrees go in `<repo>/.worktrees/<branch>`. Branch names with `/` are sanitized to `-`.

@@ -44,5 +44,9 @@ func runPopupNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("popup error: %w", err)
 	}
 
+	// If the popup exited without writing a result (user pressed Esc),
+	// write a canceled result so the sidebar stops polling.
+	tui.WriteCanceledResult(resultPath)
+
 	return nil
 }

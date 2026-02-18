@@ -22,6 +22,21 @@ type PopupResult struct {
 	Branch string `json:"branch,omitempty"`
 }
 
+// WriteCanceledResult writes a canceled result file if no result was already written.
+// Called after the popup process exits to signal cancellation to the sidebar.
+func WriteCanceledResult(resultPath string) {
+	if _, err := os.Stat(resultPath); err == nil {
+		return // result already written (successful submission)
+	}
+	result := PopupResult{Mode: "canceled"}
+	data, _ := json.Marshal(result)
+	tmp := resultPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return
+	}
+	os.Rename(tmp, resultPath)
+}
+
 // PopupModel is the Bubble Tea model for the popup directory picker.
 type PopupModel struct {
 	mode        string // "new_project" or "add_session"

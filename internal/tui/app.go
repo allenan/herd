@@ -135,6 +135,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.waitingPopup = false
+		if msg.Mode == "canceled" {
+			return a, nil
+		}
 		if msg.Mode == "worktree" {
 			if _, err := a.manager.CreateWorktreeSession(msg.Dir, msg.Branch); err != nil {
 				a.err = err.Error()
