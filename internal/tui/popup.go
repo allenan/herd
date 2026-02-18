@@ -347,27 +347,27 @@ func (m PopupModel) View() string {
 // Popup-specific styles
 var (
 	popupLabelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("39")).
+			Foreground(colorAccent).
 			Bold(true)
 
 	popupSuggestionStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("252"))
+				Foreground(colorText)
 
 	popupSuggestionSelectedStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("170")).
+					Foreground(colorClaude).
 					Bold(true)
 
 	popupProjectLabelStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("241"))
+				Foreground(colorInactive)
 
 	popupProjectNameStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("39"))
+				Foreground(colorAccent)
 
 	popupErrStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
+			Foreground(colorError)
 
 	popupHintStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
+			Foreground(colorInactive)
 )
 
 // WorktreePopupModel is the Bubble Tea model for the worktree branch popup.
