@@ -36,13 +36,14 @@ type App struct {
 	width        int
 	height       int
 	defaultDir   string
+	profileName  string
 	err          string
 	focused      bool
 	waitingPopup bool
 	showHelp     bool
 }
 
-func NewApp(manager *tmux.Manager, defaultDir string) App {
+func NewApp(manager *tmux.Manager, defaultDir, profileName string) App {
 	sidebar := NewSidebarModel()
 	sidebar.SetSessions(manager.ListSessions())
 	sidebar.SetActive(manager.State.LastActiveSession)
@@ -52,13 +53,14 @@ func NewApp(manager *tmux.Manager, defaultDir string) App {
 	s.Style = statusRunningStyle
 
 	return App{
-		mode:       modeNormal,
-		sidebar:    sidebar,
-		prompt:     NewPromptModel(),
-		spinner:    s,
-		manager:    manager,
-		defaultDir: defaultDir,
-		focused:    true,
+		mode:        modeNormal,
+		sidebar:     sidebar,
+		prompt:      NewPromptModel(),
+		spinner:     s,
+		manager:     manager,
+		defaultDir:  defaultDir,
+		profileName: profileName,
+		focused:     true,
 	}
 }
 
@@ -263,6 +265,9 @@ func (a App) launchPopup(mode, dir, project string) (tea.Model, tea.Cmd) {
 		"--dir", dir,
 		"--result-path", resultPath,
 	}
+	if a.profileName != "" {
+		popupArgs = append(popupArgs, "--profile", a.profileName)
+	}
 	if project != "" {
 		popupArgs = append(popupArgs, "--project", project)
 	}
@@ -335,6 +340,9 @@ func (a App) launchWorktreePopup(project, repoRoot string) (tea.Model, tea.Cmd) 
 		"--repo-root", repoRoot,
 		"--result-path", resultPath,
 	}
+	if a.profileName != "" {
+		popupArgs = append(popupArgs, "--profile", a.profileName)
+	}
 
 	opts := tmux.PopupOpts{
 		Title:  "New Worktree in " + project,
@@ -371,11 +379,15 @@ func (a App) renderHelp() string {
 }
 
 func (a App) View() string {
+	titleText := "🐕 herd"
+	if a.profileName != "" {
+		titleText = "🐕 herd (" + a.profileName + ")"
+	}
 	var title string
 	if a.focused {
-		title = titleStyle.Render("🐕 herd")
+		title = titleStyle.Render(titleText)
 	} else {
-		title = titleBlurredStyle.Render("🐕 herd")
+		title = titleBlurredStyle.Render(titleText)
 	}
 
 	spinnerFrame := a.spinner.View()

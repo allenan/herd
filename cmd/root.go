@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/allenan/herd/internal/profile"
 	"github.com/allenan/herd/internal/session"
 	htmux "github.com/allenan/herd/internal/tmux"
 	"github.com/charmbracelet/lipgloss"
@@ -12,6 +13,7 @@ import (
 )
 
 var sidebarFlag bool
+var profileName string
 
 var rootCmd = &cobra.Command{
 	Use:   "herd",
@@ -27,6 +29,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.Flags().BoolVar(&sidebarFlag, "sidebar", false, "run sidebar TUI (internal)")
 	rootCmd.Flags().MarkHidden("sidebar")
+	rootCmd.PersistentFlags().StringVar(&profileName, "profile", "", "named profile for isolated sessions")
 }
 
 func Execute() {
@@ -78,7 +81,13 @@ func runMain() error {
 		os.Exit(1)
 	}
 
-	statePath := session.DefaultStatePath()
+	prof, err := profile.Resolve(profileName)
+	if err != nil {
+		return fmt.Errorf("failed to resolve profile: %w", err)
+	}
+	htmux.Init(prof)
+
+	statePath := prof.StatePath()
 	state, err := session.LoadState(statePath)
 	if err != nil {
 		return fmt.Errorf("failed to load state: %w", err)
@@ -91,6 +100,8 @@ func runMain() error {
 		return fmt.Errorf("failed to start tmux server: %w", err)
 	}
 
+	htmux.ApplyEnv()
+
 	if !alreadyRunning {
 		// Fresh server — old session panes are gone, clear stale entries
 		state.Sessions = nil
@@ -98,7 +109,7 @@ func runMain() error {
 	}
 
 	if !alreadyRunning || !htmux.HasLayout(client) {
-		sidebarPaneID, viewportPaneID, err := htmux.SetupLayout(client)
+		sidebarPaneID, viewportPaneID, err := htmux.SetupLayout(client, prof.Name)
 		if err != nil {
 			return fmt.Errorf("failed to setup layout: %w", err)
 		}

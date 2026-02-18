@@ -2,9 +2,6 @@ package tmux
 
 import (
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,23 +10,6 @@ import (
 	gotmux "github.com/GianlucaP106/gotmux/gotmux"
 	"github.com/google/uuid"
 )
-
-var debugLog *log.Logger
-
-func init() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = os.Getenv("HOME")
-	}
-	logPath := filepath.Join(home, ".herd", "debug.log")
-	os.MkdirAll(filepath.Dir(logPath), 0o755)
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		debugLog = log.New(os.Stderr, "[herd] ", log.LstdFlags)
-		return
-	}
-	debugLog = log.New(f, "[herd] ", log.LstdFlags)
-}
 
 type Manager struct {
 	Client    *gotmux.Tmux
@@ -98,9 +78,9 @@ func (m *Manager) reloadState() {
 // StartCommand (contains "--sidebar") or by matching SidebarPaneID; the
 // other pane in window 0 is the viewport.
 func (m *Manager) resolveViewportPane() (string, error) {
-	sess, err := m.Client.GetSessionByName("herd-main")
+	sess, err := m.Client.GetSessionByName(SessionName())
 	if err != nil || sess == nil {
-		return "", fmt.Errorf("resolveViewportPane: failed to get herd-main session: %w", err)
+		return "", fmt.Errorf("resolveViewportPane: failed to get %s session: %w", SessionName(), err)
 	}
 
 	win, err := sess.GetWindowByIndex(0)
@@ -159,7 +139,7 @@ func (m *Manager) CreateSession(dir, name string) (*session.Session, error) {
 
 	if err := TmuxRun(
 		"new-window", "-d",
-		"-t", "herd-main",
+		"-t", SessionName(),
 		"-n", windowName,
 		"-c", dir,
 		"claude",
@@ -169,7 +149,7 @@ func (m *Manager) CreateSession(dir, name string) (*session.Session, error) {
 	}
 
 	// Find the new window's pane ID
-	sess, err := m.Client.GetSessionByName("herd-main")
+	sess, err := m.Client.GetSessionByName(SessionName())
 	if err != nil || sess == nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
@@ -227,7 +207,7 @@ func (m *Manager) CreateWorktreeSession(repoRoot, branch string) (*session.Sessi
 
 	if err := TmuxRun(
 		"new-window", "-d",
-		"-t", "herd-main",
+		"-t", SessionName(),
 		"-n", windowName,
 		"-c", wtDir,
 		"claude",
@@ -238,7 +218,7 @@ func (m *Manager) CreateWorktreeSession(repoRoot, branch string) (*session.Sessi
 	}
 
 	// Find the new window's pane ID
-	sess, err := m.Client.GetSessionByName("herd-main")
+	sess, err := m.Client.GetSessionByName(SessionName())
 	if err != nil || sess == nil {
 		worktree.Remove(repoRoot, wtDir)
 		return nil, fmt.Errorf("failed to get session: %w", err)
@@ -448,7 +428,7 @@ func (m *Manager) CollectLivePanes() ([]session.LivePane, error) {
 	// List all panes across all windows in herd-main.
 	// Format: pane_id, window_index, pane_current_command, pane_start_command, pane_current_path, pane_title
 	out, err := TmuxRunOutput(
-		"list-panes", "-s", "-t", "herd-main",
+		"list-panes", "-s", "-t", SessionName(),
 		"-F", "#{pane_id}\t#{window_index}\t#{pane_current_command}\t#{pane_start_command}\t#{pane_current_path}\t#{pane_title}",
 	)
 	if err != nil {

@@ -2,21 +2,70 @@ package tmux
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 
+	"github.com/allenan/herd/internal/profile"
 	gotmux "github.com/GianlucaP106/gotmux/gotmux"
 )
 
 const herdEnvVar = "HERD_ACTIVE"
 
+// Package-level state set by Init(). There is exactly one profile per process.
+var (
+	baseDir        string
+	sessionName    string
+	claudeConfigDir string
+	debugLog       *log.Logger
+)
+
+// Init configures the tmux package for the given profile. Must be called
+// once per process before any other function in this package.
+func Init(prof *profile.Profile) {
+	baseDir = prof.BaseDir
+	sessionName = prof.TmuxSessionName()
+	claudeConfigDir = prof.ClaudeConfigDir
+	initDebugLog(prof.LogPath())
+}
+
+// ApplyEnv sets profile-specific environment variables on the tmux server.
+// If ClaudeConfigDir is set, it becomes a global tmux env var so all new
+// panes/windows inherit it.
+func ApplyEnv() {
+	if claudeConfigDir != "" {
+		TmuxRun("set-environment", "-g", "CLAUDE_CONFIG_DIR", claudeConfigDir)
+	}
+}
+
+func initDebugLog(logPath string) {
+	os.MkdirAll(filepath.Dir(logPath), 0o755)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		debugLog = log.New(os.Stderr, "[herd] ", log.LstdFlags)
+		return
+	}
+	debugLog = log.New(f, "[herd] ", log.LstdFlags)
+}
+
 func SocketPath() string {
+	if baseDir != "" {
+		return filepath.Join(baseDir, "tmux.sock")
+	}
+	// Fallback for backward compatibility if Init not called
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = os.Getenv("HOME")
 	}
 	return filepath.Join(home, ".herd", "tmux.sock")
+}
+
+func SessionName() string {
+	if sessionName != "" {
+		return sessionName
+	}
+	return "herd-main"
 }
 
 // IsInsideHerd returns true if we're already running inside a herd tmux session.
@@ -53,7 +102,7 @@ func EnsureServer() (*gotmux.Tmux, error) {
 			return nil, fmt.Errorf("failed to create socket directory: %w", err)
 		}
 
-		cmd := tmuxCmd("-S", sockPath, "new-session", "-d", "-s", "herd-main")
+		cmd := tmuxCmd("-S", sockPath, "new-session", "-d", "-s", SessionName())
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -84,7 +133,7 @@ func TmuxRunOutput(args ...string) (string, error) {
 }
 
 func Attach() error {
-	cmd := tmuxCmd("-S", SocketPath(), "attach-session", "-t", "herd-main")
+	cmd := tmuxCmd("-S", SocketPath(), "attach-session", "-t", SessionName())
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

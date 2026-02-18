@@ -13,6 +13,7 @@
   <a href="#features">Features</a> &middot;
   <a href="#keybindings">Keybindings</a> &middot;
   <a href="#git-worktrees">Git worktrees</a> &middot;
+  <a href="#profiles">Profiles</a> &middot;
   <a href="#how-it-works">How it works</a>
 </p>
 
@@ -139,6 +140,61 @@ When you're done with a worktree session, select it and press `d`. Herd will:
 The branch itself is **not** deleted — only the worktree directory. If you've merged or pushed the branch, you can delete it through git as you normally would.
 
 > **Note:** If herd is killed unexpectedly, orphaned worktree directories may be left behind in `<repo>/.worktrees/`. You can clean these up manually with `git worktree prune` from the repo root.
+
+## Profiles
+
+If you use multiple Claude Code accounts (e.g. personal and work), profiles let you run fully isolated herd instances — each with its own sessions, state, and tmux server.
+
+```bash
+herd                  # default profile, uses ~/.herd/
+herd --profile work   # "work" profile, uses ~/.herd/profiles/work/
+```
+
+Each profile is completely independent. You can run them simultaneously in separate terminals.
+
+### How it works
+
+Named profiles automatically set `CLAUDE_CONFIG_DIR` on the tmux server, so all sessions in that profile inherit it. For example, `herd --profile work` sets `CLAUDE_CONFIG_DIR=~/.claude-work` — no additional configuration needed.
+
+This is equivalent to running `CLAUDE_CONFIG_DIR=~/.claude-work claude` manually, but herd handles it for you.
+
+### Setting up a profile
+
+On first launch, `herd --profile work` automatically creates its directory and a `config.json`:
+
+```
+~/.herd/profiles/work/
+├── config.json      # {"claude_config_dir": "/Users/you/.claude-work"}
+├── state.json
+├── tmux.sock
+└── debug.log
+```
+
+To use a different config directory, edit the config:
+
+```json
+{"claude_config_dir": "/path/to/custom/claude-config"}
+```
+
+The default profile (`herd` with no `--profile` flag) does not set `CLAUDE_CONFIG_DIR`, so Claude Code uses its standard `~/.claude` directory.
+
+### Quick access
+
+Add a shell alias for convenience:
+
+```bash
+alias herd-work="herd --profile work"
+```
+
+### Makefile targets
+
+Makefile commands accept a `PROFILE` variable:
+
+```bash
+make run PROFILE=work      # build + run with --profile work
+make kill PROFILE=work     # kill only the work profile's tmux server
+make reload PROFILE=work   # hot-swap the work profile's sidebar
+```
 
 ## How it works
 

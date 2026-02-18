@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	htmux "github.com/allenan/herd/internal/tmux"
+	"github.com/allenan/herd/internal/profile"
 	"github.com/allenan/herd/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -31,7 +31,11 @@ func runPopupNew(cmd *cobra.Command, args []string) error {
 	resultPath, _ := cmd.Flags().GetString("result-path")
 
 	if resultPath == "" {
-		resultPath = htmux.PopupResultPath()
+		prof, err := profile.Resolve(profileName)
+		if err != nil {
+			return fmt.Errorf("failed to resolve profile: %w", err)
+		}
+		resultPath = prof.PopupResultPath()
 	}
 
 	model := tui.NewPopupModel(mode, dir, project, resultPath)

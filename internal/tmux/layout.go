@@ -7,13 +7,13 @@ import (
 	gotmux "github.com/GianlucaP106/gotmux/gotmux"
 )
 
-func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID string, err error) {
-	session, err := client.GetSessionByName("herd-main")
+func SetupLayout(client *gotmux.Tmux, profileName string) (sidebarPaneID string, viewportPaneID string, err error) {
+	session, err := client.GetSessionByName(SessionName())
 	if err != nil {
-		return "", "", fmt.Errorf("failed to get herd-main session: %w", err)
+		return "", "", fmt.Errorf("failed to get %s session: %w", SessionName(), err)
 	}
 	if session == nil {
-		return "", "", fmt.Errorf("herd-main session not found")
+		return "", "", fmt.Errorf("%s session not found", SessionName())
 	}
 
 	windows, err := session.ListWindows()
@@ -21,7 +21,7 @@ func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID stri
 		return "", "", fmt.Errorf("failed to list windows: %w", err)
 	}
 	if len(windows) == 0 {
-		return "", "", fmt.Errorf("no windows found in herd-main")
+		return "", "", fmt.Errorf("no windows found in %s", SessionName())
 	}
 
 	panes, err := windows[0].ListPanes()
@@ -74,12 +74,19 @@ func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID stri
 		return "", "", fmt.Errorf("failed to get executable path: %w", err)
 	}
 
+	// Build sidebar command with optional --profile flag
+	sidebarArgs := []string{selfBin, "--sidebar"}
+	if profileName != "" {
+		sidebarArgs = append(sidebarArgs, "--profile", profileName)
+	}
+
 	// Split window: -h horizontal, -b before (left side), -l size
-	_, err = client.Command(
+	splitArgs := []string{
 		"split-window", "-h", "-b", "-l", "28",
 		"-t", viewportPaneID,
-		selfBin, "--sidebar",
-	)
+	}
+	splitArgs = append(splitArgs, sidebarArgs...)
+	_, err = client.Command(splitArgs...)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create sidebar split: %w", err)
 	}
@@ -101,17 +108,19 @@ func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID stri
 		return "", "", fmt.Errorf("could not identify sidebar pane")
 	}
 
+	sn := SessionName()
+
 	// --- Session/window options ---
 
 	// Disable status bar for clean look
-	client.Command("set-option", "-t", "herd-main", "status", "off")
+	client.Command("set-option", "-t", sn, "status", "off")
 
 	// Visible but subtle pane border between sidebar and viewport
-	client.Command("set-option", "-t", "herd-main", "pane-border-style", "fg=colour240")
-	client.Command("set-option", "-t", "herd-main", "pane-active-border-style", "fg=colour240")
+	client.Command("set-option", "-t", sn, "pane-border-style", "fg=colour240")
+	client.Command("set-option", "-t", sn, "pane-active-border-style", "fg=colour240")
 
 	// Enable focus events so panes receive focus-in/out escape sequences
-	client.Command("set-option", "-t", "herd-main", "focus-events", "on")
+	client.Command("set-option", "-t", sn, "focus-events", "on")
 
 	// Bind Ctrl-h / Ctrl-Left to focus sidebar, Ctrl-l / Ctrl-Right to focus viewport
 	client.Command("bind-key", "-n", "C-h", "select-pane", "-L")
@@ -120,13 +129,13 @@ func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID stri
 	client.Command("bind-key", "-n", "C-Right", "select-pane", "-R")
 
 	// Enable mouse mode for click-to-focus and scroll
-	client.Command("set-option", "-t", "herd-main", "mouse", "on")
+	client.Command("set-option", "-t", sn, "mouse", "on")
 
 	// Scrollback buffer for copy-mode
-	client.Command("set-option", "-t", "herd-main", "history-limit", "50000")
+	client.Command("set-option", "-t", sn, "history-limit", "50000")
 
 	// Subtle copy-mode styling (avoids jarring yellow highlight)
-	client.Command("set-option", "-t", "herd-main", "mode-style", "bg=colour236,fg=colour248")
+	client.Command("set-option", "-t", sn, "mode-style", "bg=colour236,fg=colour248")
 
 	// Scroll into copy-mode with -e so scrolling back to bottom auto-exits
 	client.Command("bind-key", "-T", "root", "WheelUpPane",
@@ -147,8 +156,8 @@ func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID stri
 	// session (small default size); tmux proportionally scales panes when a
 	// client attaches or the terminal is resized. These hooks correct it.
 	resizeCmd := fmt.Sprintf("resize-pane -t %s -x 32", sidebarPaneID)
-	client.Command("set-hook", "-t", "herd-main", "client-attached[0]", resizeCmd)
-	client.Command("set-hook", "-t", "herd-main", "client-resized[0]", resizeCmd)
+	client.Command("set-hook", "-t", sn, "client-attached[0]", resizeCmd)
+	client.Command("set-hook", "-t", sn, "client-resized[0]", resizeCmd)
 
 	return sidebarPaneID, viewportPaneID, nil
 }
@@ -160,7 +169,7 @@ func ShowPlaceholder(paneID string) {
 }
 
 func HasLayout(client *gotmux.Tmux) bool {
-	session, err := client.GetSessionByName("herd-main")
+	session, err := client.GetSessionByName(SessionName())
 	if err != nil || session == nil {
 		return false
 	}

@@ -10,6 +10,10 @@ import (
 
 // PopupResultPath returns the path for the popup result file.
 func PopupResultPath() string {
+	if baseDir != "" {
+		return filepath.Join(baseDir, "popup-result.json")
+	}
+	// Fallback if Init not called
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = os.Getenv("HOME")
