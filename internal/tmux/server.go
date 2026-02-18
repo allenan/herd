@@ -75,6 +75,14 @@ func TmuxRun(args ...string) error {
 	return tmuxCmd(all...).Run()
 }
 
+// TmuxRunOutput executes a raw tmux command and returns its stdout.
+// Like TmuxRun, it strips $TMUX so it works from inside a herd tmux pane.
+func TmuxRunOutput(args ...string) (string, error) {
+	all := append([]string{"-S", SocketPath()}, args...)
+	out, err := tmuxCmd(all...).Output()
+	return string(out), err
+}
+
 func Attach() error {
 	cmd := tmuxCmd("-S", SocketPath(), "attach-session", "-t", "herd-main")
 	cmd.Stdin = os.Stdin

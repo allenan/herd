@@ -34,6 +34,35 @@ func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID stri
 
 	viewportPaneID = panes[0].Id
 
+	// --- Terminal capability settings (BEFORE creating panes) ---
+	// These must be set before split-window / new-window so that new
+	// panes inherit the correct TERM and terminal features.
+
+	// Use xterm-256color so programs (especially Claude Code) get full
+	// capability support instead of tmux's default "screen" TERM.
+	// default-terminal is a server option, so use -g (global).
+	client.Command("set-option", "-g", "default-terminal", "xterm-256color")
+
+	// Advertise true-color (24-bit) support to the outer terminal.
+	client.Command("set-option", "-g", "terminal-overrides", ",xterm-256color:Tc")
+
+	// Reduce escape-time from the 500ms default so TUI programs respond
+	// instantly to Escape and don't confuse escape sequences.
+	client.Command("set-option", "-g", "escape-time", "10")
+
+	// Allow DCS passthrough so programs can communicate directly with the
+	// outer terminal (clipboard, Kitty graphics, etc.).
+	client.Command("set-option", "-g", "allow-passthrough", "on")
+
+	// Enable extended key encoding (CSI u / modifyOtherKeys) so modern
+	// TUI programs can distinguish key combinations correctly.
+	client.Command("set-option", "-g", "extended-keys", "on")
+
+	// Set COLORTERM so programs detect true-color support.
+	client.Command("set-environment", "-g", "COLORTERM", "truecolor")
+
+	// --- Layout ---
+
 	selfBin, err := os.Executable()
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get executable path: %w", err)
@@ -66,8 +95,14 @@ func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID stri
 		return "", "", fmt.Errorf("could not identify sidebar pane")
 	}
 
+	// --- Session/window options ---
+
 	// Disable status bar for clean look
 	client.Command("set-option", "-t", "herd-main", "status", "off")
+
+	// Visible but subtle pane border between sidebar and viewport
+	client.Command("set-option", "-t", "herd-main", "pane-border-style", "fg=colour240")
+	client.Command("set-option", "-t", "herd-main", "pane-active-border-style", "fg=colour240")
 
 	// Enable focus events so panes receive focus-in/out escape sequences
 	client.Command("set-option", "-t", "herd-main", "focus-events", "on")

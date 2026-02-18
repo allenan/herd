@@ -6,7 +6,9 @@ type Status string
 
 const (
 	StatusRunning Status = "running"
+	StatusInput   Status = "input"
 	StatusIdle    Status = "idle"
+	StatusDone    Status = "done"
 	StatusExited  Status = "exited"
 )
 

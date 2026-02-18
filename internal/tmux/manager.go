@@ -242,6 +242,9 @@ func (m *Manager) SwitchTo(sessionID string) error {
 	if sess.TmuxPaneID == viewportPaneID {
 		debugLog.Printf("SwitchTo: pane %s already in viewport, focusing", sess.TmuxPaneID)
 		m.State.LastActiveSession = sessionID
+		if sess.Status == session.StatusDone {
+			sess.Status = session.StatusIdle
+		}
 		TmuxRun("select-pane", "-t", sess.TmuxPaneID)
 		m.State.Save(m.StatePath)
 		return nil
@@ -258,6 +261,9 @@ func (m *Manager) SwitchTo(sessionID string) error {
 	// and the old viewport pane moved to where the session pane was.
 	m.State.ViewportPaneID = sess.TmuxPaneID
 	m.State.LastActiveSession = sessionID
+	if sess.Status == session.StatusDone {
+		sess.Status = session.StatusIdle
+	}
 
 	// Focus the viewport pane so keyboard input goes to the session
 	if err := TmuxRun("select-pane", "-t", sess.TmuxPaneID); err != nil {
@@ -349,12 +355,36 @@ func (m *Manager) ListSessions() []session.Session {
 	return m.State.Sessions
 }
 
-func (m *Manager) RefreshStatus() {
+func (m *Manager) RefreshStatus() bool {
+	changed := false
 	for i := range m.State.Sessions {
-		sess := &m.State.Sessions[i]
-		output, err := m.Client.Command("display-message", "-p", "-t", sess.TmuxPaneID, "#{pane_pid}")
-		if err != nil || strings.TrimSpace(output) == "" {
-			sess.Status = session.StatusExited
+		s := &m.State.Sessions[i]
+		raw := DetectStatus(s.TmuxPaneID)
+		prev := s.Status
+
+		var next session.Status
+		switch {
+		// Running → Idle while not in viewport → mark done
+		case prev == session.StatusRunning && raw == session.StatusIdle && s.TmuxPaneID != m.State.ViewportPaneID:
+			next = session.StatusDone
+		// Already done and still idle → keep done (don't let polling overwrite)
+		case prev == session.StatusDone && raw == session.StatusIdle:
+			next = session.StatusDone
+		// Done but raw changed to something else → use raw
+		case prev == session.StatusDone:
+			next = raw
+		// All other transitions → use raw
+		default:
+			next = raw
+		}
+
+		if s.Status != next {
+			s.Status = next
+			changed = true
 		}
 	}
+	if changed {
+		m.State.Save(m.StatePath)
+	}
+	return changed
 }
