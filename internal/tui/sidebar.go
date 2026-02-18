@@ -157,18 +157,30 @@ func (m *SidebarModel) rebuildItems() {
 			project: g.name,
 		})
 		if !m.collapsed[g.name] {
+			// Claude sessions first, then terminals
 			for _, s := range g.sessions {
-				m.items = append(m.items, visibleItem{
-					kind:    itemSession,
-					project: g.name,
-					session: s,
-				})
+				if s.Type != session.TypeTerminal {
+					m.items = append(m.items, visibleItem{
+						kind:    itemSession,
+						project: g.name,
+						session: s,
+					})
+				}
+			}
+			for _, s := range g.sessions {
+				if s.Type == session.TypeTerminal {
+					m.items = append(m.items, visibleItem{
+						kind:    itemSession,
+						project: g.name,
+						session: s,
+					})
+				}
 			}
 		}
 	}
 }
 
-// sessionCount returns the number of sessions in a project group.
+// sessionCount returns the total number of sessions in a project group.
 func (m *SidebarModel) sessionCount(project string) int {
 	count := 0
 	for _, s := range m.sessions {
@@ -264,9 +276,11 @@ func truncate(s string, max int) string {
 }
 
 func (m SidebarModel) renderSession(sess *session.Session, isCursor, focused, isActive bool, spinnerFrame string) string {
-	indicator := statusIndicator(sess.Status, spinnerFrame)
+	indicator := statusIndicator(sess, spinnerFrame)
 	name := sess.DisplayName()
-	if sess.IsWorktree {
+	if sess.Type == session.TypeTerminal {
+		name = "$ " + name
+	} else if sess.IsWorktree {
 		name = "\u2387 " + name // ⎇ prefix
 	}
 	display := truncate(name, 24)
@@ -302,12 +316,16 @@ func (m SidebarModel) renderSession(sess *session.Session, isCursor, focused, is
 	return fmt.Sprintf(" %s %s %s", glyph, indicator, styledName)
 }
 
-func statusIndicator(status session.Status, spinnerFrame string) string {
-	switch status {
+func statusIndicator(sess *session.Session, spinnerFrame string) string {
+	switch sess.Status {
 	case session.StatusRunning:
 		return spinnerFrame
 	case session.StatusIdle:
 		return statusIdle
+	case session.StatusShell:
+		return statusIdle
+	case session.StatusService:
+		return statusService
 	case session.StatusDone:
 		return statusDone
 	case session.StatusPlanReady:

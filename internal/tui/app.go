@@ -209,6 +209,8 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.err = ""
 		case key.Matches(msg, keys.Worktree):
 			return a.handleWorktree()
+		case key.Matches(msg, keys.Terminal):
+			return a.handleNewTerminal()
 		case key.Matches(msg, keys.Delete):
 			if sel := a.sidebar.Selected(); sel != nil {
 				a.manager.KillSession(sel.ID)
@@ -321,6 +323,28 @@ func (a App) handleWorktree() (tea.Model, tea.Cmd) {
 	return a.launchWorktreePopup(project, repoRoot)
 }
 
+func (a App) handleNewTerminal() (tea.Model, tea.Cmd) {
+	if !a.sidebar.HasSessions() {
+		a.err = "no project context for terminal"
+		return a, nil
+	}
+
+	project, dir := a.sidebar.CurrentProjectInfo()
+	if dir == "" {
+		a.err = "no project context for terminal"
+		return a, nil
+	}
+
+	if _, err := a.manager.CreateTerminal(dir, project); err != nil {
+		a.err = err.Error()
+	} else {
+		a.err = ""
+	}
+	a.sidebar.SetSessions(a.manager.ListSessions())
+	a.sidebar.SetActive(a.manager.State.LastActiveSession)
+	return a, nil
+}
+
 func (a App) launchWorktreePopup(project, repoRoot string) (tea.Model, tea.Cmd) {
 	if a.waitingPopup {
 		return a, nil
@@ -377,6 +401,7 @@ func (a App) renderHelp() string {
 		hintStyle.Render("n      new session"),
 		hintStyle.Render("N      new project"),
 		hintStyle.Render("w      worktree"),
+		hintStyle.Render("t      terminal"),
 		hintStyle.Render("d      delete"),
 		hintStyle.Render("q      quit"),
 		hintStyle.Render("?      close"),
