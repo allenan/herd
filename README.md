@@ -37,7 +37,7 @@ Ships as a single binary. No config files, no daemon, no setup.
 
 ```bash
 brew tap allenan/tap
-brew install herd
+brew install allenan/tap/herd
 ```
 
 ### From source
