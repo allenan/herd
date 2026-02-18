@@ -216,6 +216,10 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.sidebar.SetActive(a.manager.State.LastActiveSession)
 				a.err = ""
 			}
+		case key.Matches(msg, keys.Mute):
+			if a.manager.Notifier != nil {
+				a.manager.Notifier.SetMuted(!a.manager.Notifier.IsMuted())
+			}
 		case key.Matches(msg, keys.Help):
 			a.showHelp = !a.showHelp
 		}
@@ -378,6 +382,7 @@ func (a App) renderHelp() string {
 		hintStyle.Render("N      new project"),
 		hintStyle.Render("w      worktree"),
 		hintStyle.Render("d      delete"),
+		hintStyle.Render("m      mute"),
 		hintStyle.Render("q      quit"),
 		hintStyle.Render("?      close"),
 	}
@@ -388,6 +393,9 @@ func (a App) View() string {
 	titleText := "🐕 herd"
 	if a.profileName != "" {
 		titleText = "🐕 herd (" + a.profileName + ")"
+	}
+	if a.manager.Notifier != nil && a.manager.Notifier.IsMuted() {
+		titleText += " 🔇"
 	}
 	var title string
 	if a.focused {

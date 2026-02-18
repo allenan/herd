@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/allenan/herd/internal/notify"
 	"github.com/allenan/herd/internal/session"
 	"github.com/allenan/herd/internal/worktree"
 	gotmux "github.com/GianlucaP106/gotmux/gotmux"
@@ -12,9 +13,11 @@ import (
 )
 
 type Manager struct {
-	Client    *gotmux.Tmux
-	State     *session.State
-	StatePath string
+	Client      *gotmux.Tmux
+	State       *session.State
+	StatePath   string
+	Notifier    notify.Notifier // nil = no notifications
+	notifyReady bool            // set after first RefreshStatus to avoid startup spam
 }
 
 func NewManager(client *gotmux.Tmux, state *session.State, statePath string) *Manager {
@@ -526,6 +529,23 @@ func (m *Manager) RefreshStatus() bool {
 		}
 
 		if s.Status != next {
+			// Fire notification on meaningful transitions (not during startup)
+			if m.notifyReady && m.Notifier != nil {
+				switch {
+				case prev == session.StatusRunning && next == session.StatusDone:
+					m.Notifier.Notify(notify.Event{
+						SessionName: s.DisplayName(),
+						ProjectName: s.Project,
+						Status:      session.StatusDone,
+					})
+				case prev != session.StatusInput && next == session.StatusInput && s.TmuxPaneID != m.State.ViewportPaneID:
+					m.Notifier.Notify(notify.Event{
+						SessionName: s.DisplayName(),
+						ProjectName: s.Project,
+						Status:      session.StatusInput,
+					})
+				}
+			}
 			s.Status = next
 			changed = true
 		}
@@ -538,6 +558,9 @@ func (m *Manager) RefreshStatus() bool {
 				changed = true
 			}
 		}
+	}
+	if !m.notifyReady {
+		m.notifyReady = true
 	}
 	if changed {
 		m.State.Save(m.StatePath)

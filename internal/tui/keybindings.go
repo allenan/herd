@@ -11,6 +11,7 @@ type keyMap struct {
 	NewProject key.Binding
 	Worktree   key.Binding
 	Delete     key.Binding
+	Mute       key.Binding
 	Quit       key.Binding
 	Help       key.Binding
 }
@@ -47,6 +48,10 @@ var keys = keyMap{
 	Delete: key.NewBinding(
 		key.WithKeys("d"),
 		key.WithHelp("d", "delete"),
+	),
+	Mute: key.NewBinding(
+		key.WithKeys("m"),
+		key.WithHelp("m", "mute"),
 	),
 	Quit: key.NewBinding(
 		key.WithKeys("q"),
