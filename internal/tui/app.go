@@ -198,12 +198,15 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// No sessions — behave like N (new project)
 				return a.launchPopup("new_project", a.defaultDir, "")
 			}
-			// On a project or session — add session to that project
-			project, dir := a.sidebar.CurrentProjectInfo()
+			// On a project or session — instantly create session in that project
+			_, dir := a.sidebar.CurrentProjectInfo()
 			if dir == "" {
 				dir = a.defaultDir
 			}
-			return a.launchPopup("add_session", dir, project)
+			a.manager.CreateSession(dir, "New Session")
+			a.sidebar.SetSessions(a.manager.ListSessions())
+			a.sidebar.SetActive(a.manager.State.LastActiveSession)
+			a.err = ""
 		case key.Matches(msg, keys.Worktree):
 			return a.handleWorktree()
 		case key.Matches(msg, keys.Delete):

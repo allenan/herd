@@ -3,12 +3,14 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/allenan/herd/internal/profile"
 	"github.com/allenan/herd/internal/session"
 	htmux "github.com/allenan/herd/internal/tmux"
 	"github.com/allenan/herd/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func runSidebar() error {
@@ -36,6 +38,14 @@ func runSidebar() error {
 	defaultDir, err := os.Getwd()
 	if err != nil {
 		defaultDir = os.Getenv("HOME")
+	}
+
+	// Allow overriding light/dark detection (OSC 11 can be unreliable inside tmux)
+	switch strings.ToLower(os.Getenv("HERD_THEME")) {
+	case "light":
+		lipgloss.SetHasDarkBackground(false)
+	case "dark":
+		lipgloss.SetHasDarkBackground(true)
 	}
 
 	app := tui.NewApp(manager, defaultDir, prof.Name)

@@ -43,18 +43,22 @@ func Execute() {
 }
 
 func printTmuxMissing() {
+	colorClaude := lipgloss.AdaptiveColor{Dark: "#D77757", Light: "#D77757"}
+	colorText := lipgloss.AdaptiveColor{Dark: "#FFFFFF", Light: "#000000"}
+	colorAccent := lipgloss.AdaptiveColor{Dark: "#B1B9F9", Light: "#5769F7"}
+
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("205")).
+		BorderForeground(colorClaude).
 		Padding(1, 2)
 
 	title := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("205")).
+		Foreground(colorClaude).
 		Render("herd requires tmux")
 
 	body := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252")).
+		Foreground(colorText).
 		Render("tmux was not found in your PATH.\nInstall it and try again:")
 
 	var cmd string
@@ -64,7 +68,7 @@ func printTmuxMissing() {
 		cmd = "sudo apt install tmux   # Debian/Ubuntu\nsudo dnf install tmux   # Fedora"
 	}
 	code := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39")).
+		Foreground(colorAccent).
 		Bold(true).
 		Render(cmd)
 
