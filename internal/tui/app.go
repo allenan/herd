@@ -39,6 +39,7 @@ type App struct {
 	err          string
 	focused      bool
 	waitingPopup bool
+	showHelp     bool
 }
 
 func NewApp(manager *tmux.Manager, defaultDir string) App {
@@ -158,6 +159,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Dismiss help on any key except ? itself
+		if a.showHelp && !key.Matches(msg, keys.Help) {
+			a.showHelp = false
+		}
 		switch {
 		case key.Matches(msg, keys.Quit):
 			// Detach the user's terminal. The sidebar process keeps
@@ -203,6 +208,8 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.sidebar.SetActive(a.manager.State.LastActiveSession)
 				a.err = ""
 			}
+		case key.Matches(msg, keys.Help):
+			a.showHelp = !a.showHelp
 		}
 	}
 	return a, nil
@@ -345,6 +352,24 @@ func (a App) launchWorktreePopup(project, repoRoot string) (tea.Model, tea.Cmd) 
 	return a, checkPopupResult(resultPath)
 }
 
+func (a App) renderHelp() string {
+	hintStyle := statusBarStyle.PaddingTop(0)
+	header := statusBarStyle.Render("shortcuts")
+	lines := []string{
+		header,
+		hintStyle.Render("j/k    navigate"),
+		hintStyle.Render("enter  switch"),
+		hintStyle.Render("space  collapse"),
+		hintStyle.Render("n      new session"),
+		hintStyle.Render("N      new project"),
+		hintStyle.Render("w      worktree"),
+		hintStyle.Render("d      delete"),
+		hintStyle.Render("q      quit"),
+		hintStyle.Render("?      close"),
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
 func (a App) View() string {
 	var title string
 	if a.focused {
@@ -364,16 +389,19 @@ func (a App) View() string {
 
 	var statusLine string
 	if a.focused {
-		if a.err != "" {
-			statusLine = errStyle.Render("err: "+a.err) + "\n" + statusBarStyle.Render("[n]ew [N]ew project [w]orktree [d]el [q]uit")
+		if a.showHelp {
+			statusLine = a.renderHelp()
 		} else {
-			statusLine = statusBarStyle.Render("[n]ew [N]ew project [w]orktree [d]el [q]uit")
+			statusLine = statusBarStyle.Render("? shortcuts")
+		}
+		if a.err != "" {
+			statusLine = errStyle.Render("err: "+a.err) + "\n" + statusLine
 		}
 	} else {
 		if a.err != "" {
-			statusLine = errBlurredStyle.Render("err: "+a.err) + "\n" + statusBarBlurredStyle.Render("ctrl-h sidebar")
+			statusLine = errBlurredStyle.Render("err: "+a.err) + "\n" + statusBarBlurredStyle.Render("← ctrl-h · ctrl-l →")
 		} else {
-			statusLine = statusBarBlurredStyle.Render("ctrl-h sidebar")
+			statusLine = statusBarBlurredStyle.Render("← ctrl-h · ctrl-l →")
 		}
 	}
 	hints := statusLine

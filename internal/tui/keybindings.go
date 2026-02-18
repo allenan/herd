@@ -12,6 +12,7 @@ type keyMap struct {
 	Worktree   key.Binding
 	Delete     key.Binding
 	Quit       key.Binding
+	Help       key.Binding
 }
 
 var keys = keyMap{
@@ -50,5 +51,9 @@ var keys = keyMap{
 	Quit: key.NewBinding(
 		key.WithKeys("q"),
 		key.WithHelp("q", "quit"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "shortcuts"),
 	),
 }
