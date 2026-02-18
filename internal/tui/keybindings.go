@@ -10,6 +10,7 @@ type keyMap struct {
 	New        key.Binding
 	NewProject key.Binding
 	Worktree   key.Binding
+	Terminal   key.Binding
 	Delete     key.Binding
 	Mute       key.Binding
 	Quit       key.Binding
@@ -44,6 +45,10 @@ var keys = keyMap{
 	Worktree: key.NewBinding(
 		key.WithKeys("w"),
 		key.WithHelp("w", "worktree"),
+	),
+	Terminal: key.NewBinding(
+		key.WithKeys("t"),
+		key.WithHelp("t", "terminal"),
 	),
 	Delete: key.NewBinding(
 		key.WithKeys("d"),

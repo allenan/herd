@@ -12,6 +12,7 @@
   <a href="#install">Install</a> &middot;
   <a href="#features">Features</a> &middot;
   <a href="#keybindings">Keybindings</a> &middot;
+  <a href="#terminals">Terminals</a> &middot;
   <a href="#git-worktrees">Git worktrees</a> &middot;
   <a href="#profiles">Profiles</a> &middot;
   <a href="#how-it-works">How it works</a>
@@ -26,7 +27,7 @@
 
 ---
 
-Herd is a terminal UI for running multiple [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions side by side, grouped by project. Switch between them instantly, see which ones need your attention, and never lose a session to a crashed terminal again.
+Herd is a terminal UI for running multiple [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions and scratch terminals side by side, grouped by project. Switch between them instantly, see which ones need your attention, and never lose a session to a crashed terminal again.
 
 Ships as a single binary. No config files, no daemon, no setup.
 
@@ -58,13 +59,16 @@ Requires Go 1.24+ and tmux.
 
 **Status at a glance** &mdash; See which sessions are running, idle, waiting for input, or finished without switching to them.
 
-| Indicator     | Meaning     |
-| ------------- | ----------- |
-| `●` (spinner) | Running     |
-| `!`           | Needs input |
-| `●` (gray)    | Idle        |
-| `✓`           | Done        |
-| `x`           | Exited      |
+| Indicator | Claude sessions | Terminal sessions |
+| --------- | --------------- | ----------------- |
+| spinner   | Running         | Command executing |
+| `!`       | Needs input     | &mdash;           |
+| `●` gray  | Idle            | Shell idle        |
+| `✓`       | Done            | &mdash;           |
+| `◉` green | &mdash;         | Service listening |
+| `x`       | Exited          | Exited            |
+
+**Project-scoped terminals** &mdash; Press `t` to open a shell in the current project's directory. Terminals show what's running and automatically detect services listening on ports.
 
 **Sessions survive everything** &mdash; Quit herd, close your terminal, reboot your machine. Your Claude Code sessions keep running. Relaunch `herd` and they're all still there.
 
@@ -82,6 +86,7 @@ Requires Go 1.24+ and tmux.
 | `n`       | New session                   |
 | `N`       | New session (pick directory)  |
 | `w`       | New session with git worktree |
+| `t`       | New terminal                  |
 | `d`       | Delete session                |
 | `q`       | Quit (sessions keep running)  |
 
@@ -93,6 +98,36 @@ Requires Go 1.24+ and tmux.
 | `Ctrl-l` / `Ctrl-Right`   | Focus viewport        |
 
 Mouse click also switches focus. Everything in the viewport passes through to Claude Code.
+
+## Terminals
+
+Sometimes you need a plain shell alongside your Claude Code sessions &mdash; for running a dev server, tailing logs, or quick git commands. Press `t` and herd opens a terminal in the current project's directory.
+
+Terminals appear in the sidebar after Claude sessions, prefixed with `$`:
+
+```
+▼ myproject           (3)
+    Fix auth bug        ✓
+    Refactor tests      ●
+    $ shell             ●    ← idle terminal
+```
+
+### Smart status detection
+
+Herd watches what's running in your terminal and updates the sidebar automatically:
+
+- **Idle shell** &mdash; `● $ shell` &mdash; nothing running, shell prompt visible
+- **Running command** &mdash; spinner `$ node` &mdash; shows the process name
+- **Service detected** &mdash; `◉  $ :3000` &mdash; a process is listening on a TCP port
+
+Port detection works by walking the process tree of the terminal pane and checking for TCP LISTEN sockets. When you start a dev server (`npm run dev`, `python -m http.server`, etc.), the sidebar updates within a few seconds to show the port.
+
+### Creating and deleting terminals
+
+1. Select any session or project header in the sidebar
+2. Press `t`
+
+The terminal opens immediately in the selected project's directory. Delete it with `d` like any other session.
 
 ## Git worktrees
 
@@ -115,10 +150,10 @@ Herd will:
 The new session appears in the sidebar under its project with a `⎇` prefix to distinguish it from regular sessions:
 
 ```
-▼ myproject           (3)
-    main session       ●
-  ⎇ feature/auth       ●
-  ⎇ hotfix/login       ✓
+▼ myproject            (3)
+    main session        ●
+  ⎇ feature/auth        ●
+  ⎇ hotfix/login        ✓
 ```
 
 If the branch already exists (e.g. a remote branch), herd checks it out. If it doesn't exist, herd creates it from the current HEAD.

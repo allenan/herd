@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -33,6 +34,8 @@ var idlePatterns = []string{
 	"? for help",
 }
 
+var planReadyPattern = regexp.MustCompile(`\.\S+/plans/\S+\.md`)
+
 // CapturePaneContent returns the visible text of a tmux pane.
 func CapturePaneContent(paneID string) (string, error) {
 	return TmuxRunOutput("capture-pane", "-t", paneID, "-p")
@@ -56,6 +59,11 @@ func DetectStatus(paneID string) session.Status {
 		if strings.Contains(content, pattern) {
 			return session.StatusRunning
 		}
+	}
+
+	// Check for plan-ready state — plan file path visible in pane
+	if planReadyPattern.MatchString(content) {
+		return session.StatusPlanReady
 	}
 
 	// Check for permission/input prompts (highest priority after running)
@@ -90,6 +98,32 @@ func DetectAllStatuses(sessions []session.Session) bool {
 		}
 	}
 	return changed
+}
+
+// shellCommands are process names that indicate an idle shell prompt.
+var shellCommands = map[string]bool{
+	"bash": true, "zsh": true, "fish": true, "sh": true,
+	"dash": true, "tcsh": true, "ksh": true,
+}
+
+// DetectTerminalStatus classifies a terminal pane's current state by
+// inspecting its pane_current_command. Returns StatusShell for idle shells,
+// StatusRunning for active commands, or StatusExited for dead panes.
+func DetectTerminalStatus(paneID string) (session.Status, string) {
+	if !paneExists(paneID) {
+		return session.StatusExited, ""
+	}
+
+	cmd, err := TmuxRunOutput("display-message", "-p", "-t", paneID, "#{pane_current_command}")
+	if err != nil {
+		return session.StatusExited, ""
+	}
+	cmd = strings.TrimSpace(cmd)
+
+	if shellCommands[cmd] {
+		return session.StatusShell, ""
+	}
+	return session.StatusRunning, cmd
 }
 
 // noisePatterns are pane titles that carry no useful information and should

@@ -1,19 +1,20 @@
 # Herd — Claude Code Manager
 
-A TUI for managing multiple Claude Code sessions, grouped by project, with input notifications and git worktree support. Ships as a single Go binary via Homebrew.
+A TUI for managing multiple Claude Code sessions and scratch terminals, grouped by project, with input notifications and git worktree support. Ships as a single Go binary via Homebrew.
 
 ```
-+----------------+---------------------------------------+
-|  v project-1   |                                       |
-|    * feature-a |   $ claude                            |
-|    ! feature-b |   > I've updated the pricing page...  |
-|  v project-2   |                                       |
-|    * feature-c |                                       |
-|    o feature-d |                                       |
-|  > project-3   |                                       |
-|                |                                       |
-|  [n]ew [q]uit  |                                       |
-+----------------+---------------------------------------+
++-------------------+---------------------------------------+
+|  v project-1  (3) |                                       |
+|    * feature-a    |   $ claude                            |
+|    ! feature-b    |   > I've updated the pricing page...  |
+|    ● $ shell      |                                       |
+|  v project-2  (2) |                                       |
+|    * feature-c    |                                       |
+|    o feature-d    |                                       |
+|  > project-3  (1) |                                       |
+|                   |                                       |
+|  [n]ew [t]erm [q] |                                       |
++-------------------+---------------------------------------+
 ```
 
 ---
@@ -29,7 +30,7 @@ Herd is a **single Go binary** that orchestrates everything. It uses **tmux** as
 |  herd binary (Go / Bubble Tea)               |
 |  +----------+  +--------------------------+ |
 |  | Sidebar  |  | Active pane (tmux pane)  | |
-|  | (tree UI)|  | running `claude`         | |
+|  | (tree UI)|  | running claude or $SHELL | |
 |  |          |  |                          | |
 |  +----------+  +--------------------------+ |
 |         |               |                   |
@@ -162,15 +163,19 @@ func detectProject(dir string) string {
 
 Sidebar tree:
 ```
-▼ project-1                     (2)
+▼ project-1                     (4)
     ● feature-a                       ← Running (animated spinner)
   ! feature-b                         ← Needs input
+  ● $ shell                           ← Terminal (idle)
+  ◉ $ :3000                           ← Terminal (service on port)
 ▼ project-2                     (1)
   ✓ feature-c                         ← Done
 > project-3                     (1)   ← Collapsed
 ```
 
-Status indicators: spinner Running, `!` Needs input, `●` Idle, `✓` Done, `x` Exited/crashed
+Claude status indicators: spinner Running, `!` Needs input, `●` Idle, `✓` Done, `x` Exited/crashed
+
+Terminal status indicators: `●` Shell (idle), spinner Running (command executing), `◉` Service (listening on port), `x` Exited
 
 ---
 
@@ -198,7 +203,8 @@ herd/
     tmux/
       server.go              # Server bootstrap (profile-aware socket management)
       manager.go             # Session lifecycle (create, switch, kill, reconcile, status refresh)
-      capture.go             # Pane capture + status pattern matching + title cleaning
+      capture.go             # Pane capture + status pattern matching + title cleaning + terminal status
+      portdetect.go          # TCP port detection for terminal sessions (pgrep + lsof)
       layout.go              # Two-pane layout setup + terminal capabilities
       popup.go               # tmux display-popup helpers (version check, spawn)
     session/
@@ -232,10 +238,19 @@ herd/
       "name": "feature-a",
       "title": "feature-a",
       "dir": "/home/user/code/project-1",
-      "is_worktree": false,
-      "worktree_branch": "",
       "created_at": "2026-02-17T10:30:00Z",
       "status": "running"
+    },
+    {
+      "id": "e5f6g7h8",
+      "tmux_pane_id": "%7",
+      "project": "project-1",
+      "name": "shell",
+      "dir": "/home/user/code/project-1",
+      "created_at": "2026-02-17T11:00:00Z",
+      "status": "service",
+      "type": "terminal",
+      "service_port": 3000
     }
   ],
   "tmux_socket": "herd",
@@ -298,6 +313,7 @@ Sidebar focused:
   n                New session (in current project or pick directory)
   N                New session (always picks directory)
   w                New session with git worktree
+  t                New terminal in current project
   d                Delete session
   Space            Collapse/expand project group
   ?                Help overlay
@@ -448,6 +464,21 @@ tmux installed automatically as dependency. Done.
 | CLAUDE_CONFIG_DIR support | internal/profile/profile.go, tmux/server.go | ✅ Done |
 | --profile flag on all commands | cmd/root.go, cmd/sidebar.go, cmd/popup*.go | ✅ Done |
 | Makefile PROFILE variable | Makefile | ✅ Done |
+
+### Phase 3.6: Terminals — Complete
+
+**Delivers**: Project-scoped scratch terminals alongside Claude sessions, with smart status detection.
+
+| Task | File(s) | Status |
+|------|---------|--------|
+| Session type + terminal fields | internal/session/session.go | ✅ Done (`Type`, `ServicePort`, `StatusShell`, `StatusService`) |
+| Terminal status detection | internal/tmux/capture.go | ✅ Done (`DetectTerminalStatus`, `shellCommands` map) |
+| Port/service detection | internal/tmux/portdetect.go | ✅ Done (process tree walk + lsof) |
+| `CreateTerminal()` | internal/tmux/manager.go | ✅ Done (spawns `$SHELL`, no popup needed) |
+| `RefreshStatus()` refactor | internal/tmux/manager.go | ✅ Done (split into `refreshClaudeStatus` + `refreshTerminalStatus`) |
+| Sidebar rendering | internal/tui/sidebar.go | ✅ Done (`$ ` prefix, sorted after Claude sessions) |
+| Service status style | internal/tui/styles.go | ✅ Done (`◉` fisheye, green) |
+| `t` keybinding | tui/keybindings.go, tui/app.go | ✅ Done |
 
 ### Phase 4: Ship — Partially started
 

@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -265,6 +266,71 @@ func (m *Manager) CreateWorktreeSession(repoRoot, branch string) (*session.Sessi
 	return &newSession, nil
 }
 
+// CreateTerminal creates a new terminal session running $SHELL in the given directory.
+func (m *Manager) CreateTerminal(dir, project string) (*session.Session, error) {
+	m.reloadState()
+
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+
+	id := uuid.New().String()
+	windowName := fmt.Sprintf("%s/term-%s", project, id[:8])
+
+	debugLog.Printf("CreateTerminal: dir=%s project=%s window=%s", dir, project, windowName)
+
+	if err := TmuxRun(
+		"new-window", "-d",
+		"-t", SessionName(),
+		"-n", windowName,
+		"-c", dir,
+		shell,
+	); err != nil {
+		debugLog.Printf("CreateTerminal: new-window failed: %v", err)
+		return nil, fmt.Errorf("failed to create tmux window: %w", err)
+	}
+
+	// Find the new window's pane ID
+	sess, err := m.Client.GetSessionByName(SessionName())
+	if err != nil || sess == nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+
+	windows, err := sess.ListWindows()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list windows: %w", err)
+	}
+
+	if len(windows) == 0 {
+		return nil, fmt.Errorf("no windows found after creation")
+	}
+
+	newWindow := windows[len(windows)-1]
+	panes, err := newWindow.ListPanes()
+	if err != nil || len(panes) == 0 {
+		return nil, fmt.Errorf("failed to get pane for new window")
+	}
+
+	newSession := session.Session{
+		ID:         id,
+		TmuxPaneID: panes[0].Id,
+		Project:    project,
+		Name:       "shell",
+		Dir:        dir,
+		CreatedAt:  time.Now(),
+		Status:     session.StatusShell,
+		Type:       session.TypeTerminal,
+	}
+
+	debugLog.Printf("CreateTerminal: created session %s pane=%s", newSession.ID, newSession.TmuxPaneID)
+
+	m.State.AddSession(newSession)
+	m.SwitchTo(newSession.ID)
+	m.State.Save(m.StatePath)
+	return &newSession, nil
+}
+
 func (m *Manager) SwitchTo(sessionID string) error {
 	m.reloadState()
 
@@ -298,7 +364,7 @@ func (m *Manager) SwitchTo(sessionID string) error {
 	if sess.TmuxPaneID == viewportPaneID {
 		debugLog.Printf("SwitchTo: pane %s already in viewport, focusing", sess.TmuxPaneID)
 		m.State.LastActiveSession = sessionID
-		if sess.Status == session.StatusDone {
+		if sess.Status == session.StatusDone || sess.Status == session.StatusPlanReady {
 			sess.Status = session.StatusIdle
 		}
 		TmuxRun("select-pane", "-t", sess.TmuxPaneID)
@@ -317,7 +383,7 @@ func (m *Manager) SwitchTo(sessionID string) error {
 	// and the old viewport pane moved to where the session pane was.
 	m.State.ViewportPaneID = sess.TmuxPaneID
 	m.State.LastActiveSession = sessionID
-	if sess.Status == session.StatusDone {
+	if sess.Status == session.StatusDone || sess.Status == session.StatusPlanReady {
 		sess.Status = session.StatusIdle
 	}
 
@@ -509,54 +575,10 @@ func (m *Manager) RefreshStatus() bool {
 	changed := false
 	for i := range m.State.Sessions {
 		s := &m.State.Sessions[i]
-		raw := DetectStatus(s.TmuxPaneID)
-		prev := s.Status
-
-		var next session.Status
-		switch {
-		// Running → Idle while not in viewport → mark done
-		case prev == session.StatusRunning && raw == session.StatusIdle && s.TmuxPaneID != m.State.ViewportPaneID:
-			next = session.StatusDone
-		// Already done and still idle → keep done (don't let polling overwrite)
-		case prev == session.StatusDone && raw == session.StatusIdle:
-			next = session.StatusDone
-		// Done but raw changed to something else → use raw
-		case prev == session.StatusDone:
-			next = raw
-		// All other transitions → use raw
-		default:
-			next = raw
-		}
-
-		if s.Status != next {
-			// Fire notification on meaningful transitions (not during startup)
-			if m.notifyReady && m.Notifier != nil {
-				switch {
-				case prev == session.StatusRunning && next == session.StatusDone:
-					m.Notifier.Notify(notify.Event{
-						SessionName: s.DisplayName(),
-						ProjectName: s.Project,
-						Status:      session.StatusDone,
-					})
-				case prev != session.StatusInput && next == session.StatusInput && s.TmuxPaneID != m.State.ViewportPaneID:
-					m.Notifier.Notify(notify.Event{
-						SessionName: s.DisplayName(),
-						ProjectName: s.Project,
-						Status:      session.StatusInput,
-					})
-				}
-			}
-			s.Status = next
-			changed = true
-		}
-
-		// Capture pane title set by Claude Code via OSC sequences
-		if rawTitle, err := CapturePaneTitle(s.TmuxPaneID); err == nil {
-			title := CleanPaneTitle(rawTitle)
-			if title != s.Title {
-				s.Title = title
-				changed = true
-			}
+		if s.Type == session.TypeTerminal {
+			changed = m.refreshTerminalStatus(s) || changed
+		} else {
+			changed = m.refreshClaudeStatus(s) || changed
 		}
 	}
 	if !m.notifyReady {
@@ -565,5 +587,111 @@ func (m *Manager) RefreshStatus() bool {
 	if changed {
 		m.State.Save(m.StatePath)
 	}
+	return changed
+}
+
+func (m *Manager) refreshClaudeStatus(s *session.Session) bool {
+	changed := false
+	raw := DetectStatus(s.TmuxPaneID)
+	prev := s.Status
+
+	var next session.Status
+	switch {
+	// Running → Idle while not in viewport → mark done
+	case prev == session.StatusRunning && raw == session.StatusIdle && s.TmuxPaneID != m.State.ViewportPaneID:
+		next = session.StatusDone
+	// Running → PlanReady while not in viewport → keep PlanReady
+	case prev == session.StatusRunning && raw == session.StatusPlanReady && s.TmuxPaneID != m.State.ViewportPaneID:
+		next = session.StatusPlanReady
+	// Already done and still idle → keep done (don't let polling overwrite)
+	case prev == session.StatusDone && raw == session.StatusIdle:
+		next = session.StatusDone
+	// Done but raw changed to something else → use raw
+	case prev == session.StatusDone:
+		next = raw
+	// PlanReady + Idle → keep PlanReady (plan path scrolled off visible area)
+	case prev == session.StatusPlanReady && raw == session.StatusIdle:
+		next = session.StatusPlanReady
+	// PlanReady + other → use raw (user accepted/rejected, Claude moved on)
+	case prev == session.StatusPlanReady:
+		next = raw
+	// All other transitions → use raw
+	default:
+		next = raw
+	}
+
+	if s.Status != next {
+		// Fire notification on meaningful transitions (not during startup)
+		if m.notifyReady && m.Notifier != nil {
+			switch {
+			case prev == session.StatusRunning && next == session.StatusDone:
+				m.Notifier.Notify(notify.Event{
+					SessionName: s.DisplayName(),
+					ProjectName: s.Project,
+					Status:      session.StatusDone,
+				})
+			case prev == session.StatusRunning && next == session.StatusPlanReady:
+				m.Notifier.Notify(notify.Event{
+					SessionName: s.DisplayName(),
+					ProjectName: s.Project,
+					Status:      session.StatusInput,
+				})
+			case prev != session.StatusInput && next == session.StatusInput && s.TmuxPaneID != m.State.ViewportPaneID:
+				m.Notifier.Notify(notify.Event{
+					SessionName: s.DisplayName(),
+					ProjectName: s.Project,
+					Status:      session.StatusInput,
+				})
+			}
+		}
+		s.Status = next
+		changed = true
+	}
+
+	// Capture pane title set by Claude Code via OSC sequences
+	if rawTitle, err := CapturePaneTitle(s.TmuxPaneID); err == nil {
+		title := CleanPaneTitle(rawTitle)
+		if title != s.Title {
+			s.Title = title
+			changed = true
+		}
+	}
+	return changed
+}
+
+func (m *Manager) refreshTerminalStatus(s *session.Session) bool {
+	changed := false
+
+	status, cmdName := DetectTerminalStatus(s.TmuxPaneID)
+
+	// If a command is running, check for listening ports
+	if status == session.StatusRunning {
+		port := DetectListeningPort(s.TmuxPaneID)
+		if port > 0 {
+			status = session.StatusService
+			if s.ServicePort != port {
+				s.ServicePort = port
+				changed = true
+			}
+		} else if s.ServicePort != 0 {
+			s.ServicePort = 0
+			changed = true
+		}
+	} else if s.ServicePort != 0 {
+		s.ServicePort = 0
+		changed = true
+	}
+
+	if s.Status != status {
+		s.Status = status
+		changed = true
+	}
+
+	// Update Title with the running command name (empty for idle shells)
+	if s.Title != cmdName {
+		s.Title = cmdName
+		changed = true
+	}
+
 	return changed
 }
