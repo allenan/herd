@@ -6,6 +6,7 @@ type keyMap struct {
 	Up     key.Binding
 	Down   key.Binding
 	Enter  key.Binding
+	Space  key.Binding
 	New    key.Binding
 	Delete key.Binding
 	Quit   key.Binding
@@ -23,6 +24,10 @@ var keys = keyMap{
 	Enter: key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "switch"),
+	),
+	Space: key.NewBinding(
+		key.WithKeys(" "),
+		key.WithHelp("space", "toggle"),
 	),
 	New: key.NewBinding(
 		key.WithKeys("n"),

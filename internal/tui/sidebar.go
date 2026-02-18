@@ -6,27 +6,68 @@ import (
 	"github.com/allenan/herd/internal/session"
 )
 
+type itemKind int
+
+const (
+	itemProject itemKind = iota
+	itemSession
+)
+
+type visibleItem struct {
+	kind    itemKind
+	project string
+	session *session.Session // nil for project headers
+}
+
 type SidebarModel struct {
-	sessions []session.Session
-	cursor   int
-	activeID string
+	sessions  []session.Session
+	items     []visibleItem
+	collapsed map[string]bool
+	cursor    int
+	activeID  string
 }
 
 func NewSidebarModel() SidebarModel {
-	return SidebarModel{}
+	return SidebarModel{
+		collapsed: make(map[string]bool),
+	}
 }
 
 func (m *SidebarModel) SetSessions(sessions []session.Session) {
 	m.sessions = sessions
-	if m.cursor >= len(sessions) && len(sessions) > 0 {
-		m.cursor = len(sessions) - 1
+
+	// Prune collapsed entries for projects that no longer exist
+	projects := make(map[string]bool)
+	for _, s := range sessions {
+		projects[s.Project] = true
+	}
+	for p := range m.collapsed {
+		if !projects[p] {
+			delete(m.collapsed, p)
+		}
+	}
+
+	m.rebuildItems()
+
+	if m.cursor >= len(m.items) && len(m.items) > 0 {
+		m.cursor = len(m.items) - 1
 	}
 }
 
 func (m *SidebarModel) SetActive(id string) {
 	m.activeID = id
-	for i, s := range m.sessions {
-		if s.ID == id {
+
+	// Auto-expand collapsed project containing the active session
+	for _, s := range m.sessions {
+		if s.ID == id && m.collapsed[s.Project] {
+			m.collapsed[s.Project] = false
+			m.rebuildItems()
+			break
+		}
+	}
+
+	for i, item := range m.items {
+		if item.kind == itemSession && item.session != nil && item.session.ID == id {
 			m.cursor = i
 			return
 		}
@@ -40,16 +81,102 @@ func (m *SidebarModel) MoveUp() {
 }
 
 func (m *SidebarModel) MoveDown() {
-	if m.cursor < len(m.sessions)-1 {
+	if m.cursor < len(m.items)-1 {
 		m.cursor++
 	}
 }
 
 func (m *SidebarModel) Selected() *session.Session {
-	if len(m.sessions) == 0 {
+	if len(m.items) == 0 || m.cursor >= len(m.items) {
 		return nil
 	}
-	return &m.sessions[m.cursor]
+	item := m.items[m.cursor]
+	if item.kind == itemSession {
+		return item.session
+	}
+	return nil
+}
+
+func (m *SidebarModel) IsOnProject() bool {
+	if len(m.items) == 0 || m.cursor >= len(m.items) {
+		return false
+	}
+	return m.items[m.cursor].kind == itemProject
+}
+
+func (m *SidebarModel) ToggleCollapse() {
+	if len(m.items) == 0 || m.cursor >= len(m.items) {
+		return
+	}
+	item := m.items[m.cursor]
+	project := item.project
+	wasCollapsed := m.collapsed[project]
+	m.collapsed[project] = !wasCollapsed
+
+	if !wasCollapsed {
+		// Collapsing — move cursor to the project header
+		m.rebuildItems()
+		for i, it := range m.items {
+			if it.kind == itemProject && it.project == project {
+				m.cursor = i
+				return
+			}
+		}
+	} else {
+		m.rebuildItems()
+	}
+}
+
+func (m *SidebarModel) rebuildItems() {
+	m.items = nil
+
+	// Group sessions by project in encounter order
+	type projectGroup struct {
+		name     string
+		sessions []*session.Session
+	}
+	var groups []projectGroup
+	seen := make(map[string]int)
+
+	for i := range m.sessions {
+		s := &m.sessions[i]
+		if idx, ok := seen[s.Project]; ok {
+			groups[idx].sessions = append(groups[idx].sessions, s)
+		} else {
+			seen[s.Project] = len(groups)
+			groups = append(groups, projectGroup{
+				name:     s.Project,
+				sessions: []*session.Session{s},
+			})
+		}
+	}
+
+	for _, g := range groups {
+		m.items = append(m.items, visibleItem{
+			kind:    itemProject,
+			project: g.name,
+		})
+		if !m.collapsed[g.name] {
+			for _, s := range g.sessions {
+				m.items = append(m.items, visibleItem{
+					kind:    itemSession,
+					project: g.name,
+					session: s,
+				})
+			}
+		}
+	}
+}
+
+// sessionCount returns the number of sessions in a project group.
+func (m *SidebarModel) sessionCount(project string) int {
+	count := 0
+	for _, s := range m.sessions {
+		if s.Project == project {
+			count++
+		}
+	}
+	return count
 }
 
 func (m SidebarModel) View(width, height int, focused bool, spinnerFrame string) string {
@@ -61,25 +188,56 @@ func (m SidebarModel) View(width, height int, focused bool, spinnerFrame string)
 	}
 
 	var s string
-	for i, sess := range m.sessions {
-		indicator := statusIndicator(sess.Status, spinnerFrame)
-		name := fmt.Sprintf("%s/%s", sess.Project, sess.Name)
+	for i, item := range m.items {
+		isCursor := i == m.cursor
 
-		if focused {
-			if i == m.cursor {
-				s += selectedStyle.Render(fmt.Sprintf("> %s %s", indicator, name)) + "\n"
-			} else {
-				s += normalStyle.Render(fmt.Sprintf("  %s %s", indicator, name)) + "\n"
-			}
-		} else {
-			if i == m.cursor {
-				s += selectedBlurredStyle.Render(fmt.Sprintf("  %s %s", indicator, name)) + "\n"
-			} else {
-				s += normalBlurredStyle.Render(fmt.Sprintf("  %s %s", indicator, name)) + "\n"
-			}
+		switch item.kind {
+		case itemProject:
+			s += m.renderProject(item.project, isCursor, focused) + "\n"
+		case itemSession:
+			s += m.renderSession(item.session, isCursor, focused, spinnerFrame) + "\n"
 		}
 	}
 	return s
+}
+
+func (m SidebarModel) renderProject(project string, isCursor, focused bool) string {
+	chevron := chevronStyle.Render("▼")
+	if m.collapsed[project] {
+		chevron = chevronStyle.Render("▶")
+	}
+	count := fmt.Sprintf("(%d)", m.sessionCount(project))
+
+	if focused {
+		if isCursor {
+			countStr := sessionCountStyle.Render(count)
+			name := selectedStyle.Render(project)
+			return fmt.Sprintf(" %s %s %s %s", cursorGlyph, chevron, name, countStr)
+		}
+		countStr := sessionCountStyle.Render(count)
+		name := projectHeaderStyle.Render(project)
+		return fmt.Sprintf("   %s %s %s", chevron, name, countStr)
+	}
+
+	countStr := sessionCountBlurredStyle.Render(count)
+	name := projectHeaderBlurredStyle.Render(project)
+	return fmt.Sprintf("   %s %s %s", chevron, name, countStr)
+}
+
+func (m SidebarModel) renderSession(sess *session.Session, isCursor, focused bool, spinnerFrame string) string {
+	indicator := statusIndicator(sess.Status, spinnerFrame)
+
+	if focused {
+		if isCursor {
+			name := selectedStyle.Render(sess.Name)
+			return fmt.Sprintf(" %s   %s %s", cursorGlyph, indicator, name)
+		}
+		name := normalStyle.Render(sess.Name)
+		return fmt.Sprintf("       %s %s", indicator, name)
+	}
+
+	name := normalBlurredStyle.Render(sess.Name)
+	return fmt.Sprintf("       %s %s", indicator, name)
 }
 
 func statusIndicator(status session.Status, spinnerFrame string) string {
