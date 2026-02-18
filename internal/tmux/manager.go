@@ -634,7 +634,7 @@ func (m *Manager) refreshClaudeStatus(s *session.Session) bool {
 				m.Notifier.Notify(notify.Event{
 					SessionName: s.DisplayName(),
 					ProjectName: s.Project,
-					Status:      session.StatusInput,
+					Status:      session.StatusPlanReady,
 				})
 			case prev != session.StatusInput && next == session.StatusInput && s.TmuxPaneID != m.State.ViewportPaneID:
 				m.Notifier.Notify(notify.Event{

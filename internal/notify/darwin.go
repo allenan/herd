@@ -32,22 +32,29 @@ func (n *darwinNotifier) Notify(event Event) {
 		return
 	}
 
-	var title, body, sound string
+	var title, subtitle, body, sound string
 	switch event.Status {
 	case session.StatusInput:
-		title = "Needs input"
-		body = fmt.Sprintf("%s — %s", event.ProjectName, event.SessionName)
+		title = "Herd: Needs Input"
+		subtitle = event.SessionName
+		body = event.ProjectName
+		sound = soundInput
+	case session.StatusPlanReady:
+		title = "Herd: Plan Ready"
+		subtitle = event.SessionName
+		body = event.ProjectName
 		sound = soundInput
 	case session.StatusDone:
-		title = "Task complete"
-		body = fmt.Sprintf("%s — %s", event.ProjectName, event.SessionName)
+		title = "Herd: Task Complete"
+		subtitle = event.SessionName
+		body = event.ProjectName
 		sound = soundDone
 	default:
 		return
 	}
 
 	go func() {
-		script := fmt.Sprintf(`display notification %q with title %q`, body, title)
+		script := fmt.Sprintf(`display notification %q with title %q subtitle %q`, body, title, subtitle)
 		exec.Command("osascript", "-e", script).Run()
 		if sound != "" {
 			exec.Command("afplay", sound).Run()
