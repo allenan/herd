@@ -269,6 +269,38 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if sel := a.sidebar.Selected(); sel != nil {
 				a.pendingDelete = sel
 			}
+		case key.Matches(msg, keys.MoveUp):
+			if a.sidebar.Filter() == "" {
+				if a.sidebar.IsOnProject() {
+					project := a.sidebar.CursorProject()
+					if a.manager.MoveProject(project, -1) {
+						a.sidebar.SetSessions(a.manager.ListSessions())
+						a.sidebar.SetCursorToProject(project)
+					}
+				} else if sel := a.sidebar.Selected(); sel != nil {
+					id := sel.ID // capture before swap mutates the shared slice
+					if a.manager.MoveSession(id, -1) {
+						a.sidebar.SetSessions(a.manager.ListSessions())
+						a.sidebar.SetCursorToSession(id)
+					}
+				}
+			}
+		case key.Matches(msg, keys.MoveDown):
+			if a.sidebar.Filter() == "" {
+				if a.sidebar.IsOnProject() {
+					project := a.sidebar.CursorProject()
+					if a.manager.MoveProject(project, 1) {
+						a.sidebar.SetSessions(a.manager.ListSessions())
+						a.sidebar.SetCursorToProject(project)
+					}
+				} else if sel := a.sidebar.Selected(); sel != nil {
+					id := sel.ID // capture before swap mutates the shared slice
+					if a.manager.MoveSession(id, 1) {
+						a.sidebar.SetSessions(a.manager.ListSessions())
+						a.sidebar.SetCursorToSession(id)
+					}
+				}
+			}
 		case key.Matches(msg, keys.Search):
 			a.mode = modeSearch
 			a.searchText = ""
@@ -487,6 +519,7 @@ func (a App) renderHelp() string {
 		hintStyle.Render("j/k    navigate"),
 		hintStyle.Render("enter  switch"),
 		hintStyle.Render("space  collapse"),
+		hintStyle.Render("J/K    move up/down"),
 		hintStyle.Render("/      search"),
 		hintStyle.Render("n      new session"),
 		hintStyle.Render("N      new project"),

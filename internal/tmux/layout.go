@@ -59,6 +59,11 @@ func SetupLayout(client *gotmux.Tmux, profileName string) (sidebarPaneID string,
 	// herd captures these via #{pane_title} to auto-name sessions.
 	client.Command("set-option", "-g", "allow-rename", "on")
 	client.Command("set-option", "-g", "set-titles", "on")
+	if profileName != "" {
+		client.Command("set-option", "-g", "set-titles-string", fmt.Sprintf("herd [%s]", profileName))
+	} else {
+		client.Command("set-option", "-g", "set-titles-string", "herd")
+	}
 
 	// Enable extended key encoding (CSI u / modifyOtherKeys) so modern
 	// TUI programs can distinguish key combinations correctly.

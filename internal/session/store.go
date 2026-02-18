@@ -127,3 +127,106 @@ func (s *State) FindByPaneID(paneID string) *Session {
 	}
 	return nil
 }
+
+// MoveSession moves a session up (direction=-1) or down (direction=1) among
+// same-type siblings within its project. Returns true if moved.
+func (s *State) MoveSession(sessionID string, direction int) bool {
+	// Find the target session
+	var targetIdx int = -1
+	var targetProject string
+	var targetType SessionType
+	for i, sess := range s.Sessions {
+		if sess.ID == sessionID {
+			targetIdx = i
+			targetProject = sess.Project
+			targetType = sess.Type
+			break
+		}
+	}
+	if targetIdx < 0 {
+		return false
+	}
+
+	// Collect indices of same-project, same-type siblings in slice order
+	var siblingIndices []int
+	for i, sess := range s.Sessions {
+		if sess.Project == targetProject && sess.Type == targetType {
+			siblingIndices = append(siblingIndices, i)
+		}
+	}
+
+	// Find position of target among siblings
+	var pos int = -1
+	for i, idx := range siblingIndices {
+		if idx == targetIdx {
+			pos = i
+			break
+		}
+	}
+	if pos < 0 {
+		return false
+	}
+
+	// Check boundary
+	newPos := pos + direction
+	if newPos < 0 || newPos >= len(siblingIndices) {
+		return false
+	}
+
+	// Swap in the flat slice
+	swapIdx := siblingIndices[newPos]
+	s.Sessions[targetIdx], s.Sessions[swapIdx] = s.Sessions[swapIdx], s.Sessions[targetIdx]
+	return true
+}
+
+// MoveProject moves an entire project group up (direction=-1) or down
+// (direction=1) relative to adjacent projects. Returns true if moved.
+func (s *State) MoveProject(project string, direction int) bool {
+	// Group sessions by project in encounter order
+	type projectGroup struct {
+		name    string
+		members []Session
+	}
+	var groups []projectGroup
+	seen := make(map[string]int)
+
+	for _, sess := range s.Sessions {
+		if idx, ok := seen[sess.Project]; ok {
+			groups[idx].members = append(groups[idx].members, sess)
+		} else {
+			seen[sess.Project] = len(groups)
+			groups = append(groups, projectGroup{
+				name:    sess.Project,
+				members: []Session{sess},
+			})
+		}
+	}
+
+	// Find target group
+	var pos int = -1
+	for i, g := range groups {
+		if g.name == project {
+			pos = i
+			break
+		}
+	}
+	if pos < 0 {
+		return false
+	}
+
+	// Check boundary
+	newPos := pos + direction
+	if newPos < 0 || newPos >= len(groups) {
+		return false
+	}
+
+	// Swap groups
+	groups[pos], groups[newPos] = groups[newPos], groups[pos]
+
+	// Flatten back
+	s.Sessions = s.Sessions[:0]
+	for _, g := range groups {
+		s.Sessions = append(s.Sessions, g.members...)
+	}
+	return true
+}

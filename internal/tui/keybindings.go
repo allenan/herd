@@ -13,6 +13,8 @@ type keyMap struct {
 	Terminal   key.Binding
 	Delete     key.Binding
 	Search     key.Binding
+	MoveUp     key.Binding
+	MoveDown   key.Binding
 	Mute       key.Binding
 	Reload     key.Binding
 	Quit       key.Binding
@@ -59,6 +61,14 @@ var keys = keyMap{
 	Search: key.NewBinding(
 		key.WithKeys("/"),
 		key.WithHelp("/", "search"),
+	),
+	MoveUp: key.NewBinding(
+		key.WithKeys("K"),
+		key.WithHelp("K", "move up"),
+	),
+	MoveDown: key.NewBinding(
+		key.WithKeys("J"),
+		key.WithHelp("J", "move down"),
 	),
 	Mute: key.NewBinding(
 		key.WithKeys("m"),

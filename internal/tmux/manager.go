@@ -487,6 +487,26 @@ func (m *Manager) ListSessions() []session.Session {
 	return m.State.Sessions
 }
 
+// MoveSession moves a session among same-type siblings within its project.
+// direction: -1 = up, 1 = down. Returns true if moved.
+func (m *Manager) MoveSession(sessionID string, direction int) bool {
+	if m.State.MoveSession(sessionID, direction) {
+		m.State.Save(m.StatePath)
+		return true
+	}
+	return false
+}
+
+// MoveProject moves an entire project group up or down.
+// direction: -1 = up, 1 = down. Returns true if moved.
+func (m *Manager) MoveProject(project string, direction int) bool {
+	if m.State.MoveProject(project, direction) {
+		m.State.Save(m.StatePath)
+		return true
+	}
+	return false
+}
+
 // CollectLivePanes queries tmux for all panes in herd-main, returning them
 // as session.LivePane values with pre-cleaned titles.
 func (m *Manager) CollectLivePanes() ([]session.LivePane, error) {

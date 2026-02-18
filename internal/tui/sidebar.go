@@ -222,6 +222,38 @@ func (m *SidebarModel) CurrentProjectInfo() (project, dir string) {
 	return projectName, ""
 }
 
+// SetCursorToSession positions the cursor on the given session ID
+// without changing activeID. Returns true if found.
+func (m *SidebarModel) SetCursorToSession(id string) bool {
+	for i, item := range m.items {
+		if item.kind == itemSession && item.session != nil && item.session.ID == id {
+			m.cursor = i
+			return true
+		}
+	}
+	return false
+}
+
+// SetCursorToProject positions the cursor on the given project header
+// without changing activeID. Returns true if found.
+func (m *SidebarModel) SetCursorToProject(project string) bool {
+	for i, item := range m.items {
+		if item.kind == itemProject && item.project == project {
+			m.cursor = i
+			return true
+		}
+	}
+	return false
+}
+
+// CursorProject returns the project name at the current cursor position.
+func (m *SidebarModel) CursorProject() string {
+	if len(m.items) == 0 || m.cursor >= len(m.items) {
+		return ""
+	}
+	return m.items[m.cursor].project
+}
+
 // HasSessions returns true if there are any sessions.
 func (m *SidebarModel) HasSessions() bool {
 	return len(m.sessions) > 0
