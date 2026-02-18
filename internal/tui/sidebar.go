@@ -265,7 +265,11 @@ func truncate(s string, max int) string {
 
 func (m SidebarModel) renderSession(sess *session.Session, isCursor, focused, isActive bool, spinnerFrame string) string {
 	indicator := statusIndicator(sess.Status, spinnerFrame)
-	display := truncate(sess.DisplayName(), 24)
+	name := sess.DisplayName()
+	if sess.IsWorktree {
+		name = "\u2387 " + name // ⎇ prefix
+	}
+	display := truncate(name, 24)
 
 	// All sessions use the same layout: " GG  I name"
 	// where GG = 2-char glyph column (▸ + space, or 2 spaces),
@@ -280,22 +284,22 @@ func (m SidebarModel) renderSession(sess *session.Session, isCursor, focused, is
 		glyph = "  "
 	}
 
-	var name string
+	var styledName string
 	if focused {
 		if isCursor {
-			name = selectedStyle.Render(display)
+			styledName = selectedStyle.Render(display)
 		} else {
-			name = normalStyle.Render(display)
+			styledName = normalStyle.Render(display)
 		}
 	} else {
 		if isActive {
-			name = activeStyle.Render(display)
+			styledName = activeStyle.Render(display)
 		} else {
-			name = normalBlurredStyle.Render(display)
+			styledName = normalBlurredStyle.Render(display)
 		}
 	}
 
-	return fmt.Sprintf(" %s %s %s", glyph, indicator, name)
+	return fmt.Sprintf(" %s %s %s", glyph, indicator, styledName)
 }
 
 func statusIndicator(status session.Status, spinnerFrame string) string {

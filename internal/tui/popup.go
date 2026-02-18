@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/allenan/herd/internal/session"
+	"github.com/allenan/herd/internal/worktree"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -16,8 +17,9 @@ const maxVisibleSuggestions = 8
 
 // PopupResult is the JSON structure written to the result file.
 type PopupResult struct {
-	Dir  string `json:"dir"`
-	Mode string `json:"mode"`
+	Dir    string `json:"dir"`
+	Mode   string `json:"mode"`
+	Branch string `json:"branch,omitempty"`
 }
 
 // PopupModel is the Bubble Tea model for the popup directory picker.
@@ -352,3 +354,130 @@ var (
 	popupHintStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241"))
 )
+
+// WorktreePopupModel is the Bubble Tea model for the worktree branch popup.
+type WorktreePopupModel struct {
+	projectName string
+	repoRoot    string
+	branchInput textinput.Model
+	err         string
+	width       int
+	height      int
+	resultPath  string
+}
+
+// NewWorktreePopupModel creates a new worktree popup model.
+func NewWorktreePopupModel(projectName, repoRoot, resultPath string) WorktreePopupModel {
+	ti := textinput.New()
+	ti.Placeholder = "feature/my-branch"
+	ti.CharLimit = 256
+	ti.Width = 50
+	ti.Focus()
+
+	return WorktreePopupModel{
+		projectName: projectName,
+		repoRoot:    repoRoot,
+		branchInput: ti,
+		resultPath:  resultPath,
+	}
+}
+
+func (m WorktreePopupModel) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+func (m WorktreePopupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		if m.width > 4 {
+			m.branchInput.Width = m.width - 8
+		}
+		return m, nil
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			return m, tea.Quit
+
+		case "enter":
+			branch := strings.TrimSpace(m.branchInput.Value())
+			if branch == "" {
+				m.err = "branch name required"
+				return m, nil
+			}
+			m.err = ""
+			if err := m.writeResult(branch); err != nil {
+				m.err = "failed to write result"
+				return m, nil
+			}
+			return m, tea.Quit
+		}
+	}
+
+	var cmd tea.Cmd
+	m.branchInput, cmd = m.branchInput.Update(msg)
+	return m, cmd
+}
+
+func (m *WorktreePopupModel) writeResult(branch string) error {
+	result := PopupResult{
+		Dir:    m.repoRoot,
+		Mode:   "worktree",
+		Branch: branch,
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	tmp := m.resultPath + ".tmp"
+	if err := os.MkdirAll(filepath.Dir(m.resultPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, m.resultPath)
+}
+
+func (m WorktreePopupModel) View() string {
+	w := m.width
+	if w <= 0 {
+		w = 60
+	}
+
+	branchLabel := popupLabelStyle.Render("Branch")
+	branchInput := m.branchInput.View()
+
+	// Path preview
+	branch := strings.TrimSpace(m.branchInput.Value())
+	var pathLine string
+	if branch != "" {
+		wtDir := worktree.WorktreeDir(m.repoRoot, branch)
+		pathLine = popupProjectLabelStyle.Render("Path: ") + popupProjectNameStyle.Render(ContractPath(wtDir))
+	}
+
+	var errLine string
+	if m.err != "" {
+		errLine = popupErrStyle.Render(m.err)
+	}
+
+	hints := popupHintStyle.Render("enter create \u00b7 esc cancel")
+
+	var sections []string
+	sections = append(sections, "")
+	sections = append(sections, "  "+branchLabel)
+	sections = append(sections, "  "+branchInput)
+	sections = append(sections, "")
+	if errLine != "" {
+		sections = append(sections, "  "+errLine)
+	}
+	if pathLine != "" {
+		sections = append(sections, "  "+pathLine)
+	}
+	sections = append(sections, "")
+	sections = append(sections, "  "+hints)
+
+	return strings.Join(sections, "\n")
+}

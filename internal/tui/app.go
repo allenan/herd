@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/allenan/herd/internal/session"
 	"github.com/allenan/herd/internal/tmux"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -70,8 +71,9 @@ func statusTick() tea.Cmd {
 
 // popupResultMsg is sent when the popup process writes a result file.
 type popupResultMsg struct {
-	Dir  string
-	Mode string
+	Dir    string
+	Mode   string
+	Branch string
 }
 
 // popupCheckMsg triggers re-checking for the popup result file.
@@ -89,7 +91,7 @@ func checkPopupResult(resultPath string) tea.Cmd {
 		if err := json.Unmarshal(data, &result); err != nil {
 			return popupCheckMsg{}
 		}
-		return popupResultMsg{Dir: result.Dir, Mode: result.Mode}
+		return popupResultMsg{Dir: result.Dir, Mode: result.Mode, Branch: result.Branch}
 	})
 }
 
@@ -130,10 +132,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.waitingPopup = false
-		a.manager.CreateSession(msg.Dir, "New Session")
+		if msg.Mode == "worktree" {
+			if _, err := a.manager.CreateWorktreeSession(msg.Dir, msg.Branch); err != nil {
+				a.err = err.Error()
+			} else {
+				a.err = ""
+			}
+		} else {
+			a.manager.CreateSession(msg.Dir, "New Session")
+			a.err = ""
+		}
 		a.sidebar.SetSessions(a.manager.ListSessions())
 		a.sidebar.SetActive(a.manager.State.LastActiveSession)
-		a.err = ""
 		return a, nil
 	}
 
@@ -184,6 +194,8 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				dir = a.defaultDir
 			}
 			return a.launchPopup("add_session", dir, project)
+		case key.Matches(msg, keys.Worktree):
+			return a.handleWorktree()
 		case key.Matches(msg, keys.Delete):
 			if sel := a.sidebar.Selected(); sel != nil {
 				a.manager.KillSession(sel.ID)
@@ -269,6 +281,70 @@ func (a App) launchPopup(mode, dir, project string) (tea.Model, tea.Cmd) {
 	return a, checkPopupResult(resultPath)
 }
 
+func (a App) handleWorktree() (tea.Model, tea.Cmd) {
+	if !a.sidebar.HasSessions() {
+		a.err = "no project context for worktree"
+		return a, nil
+	}
+
+	_, dir := a.sidebar.CurrentProjectInfo()
+	if dir == "" {
+		a.err = "no project context for worktree"
+		return a, nil
+	}
+
+	repoRoot := session.DetectRepoRoot(dir)
+	if repoRoot == "" {
+		a.err = "not a git repository"
+		return a, nil
+	}
+
+	project := session.DetectProject(dir)
+	return a.launchWorktreePopup(project, repoRoot)
+}
+
+func (a App) launchWorktreePopup(project, repoRoot string) (tea.Model, tea.Cmd) {
+	if a.waitingPopup {
+		return a, nil
+	}
+
+	if !tmux.TmuxSupportsPopup() {
+		a.err = "worktrees require tmux >= 3.2"
+		return a, nil
+	}
+
+	resultPath := tmux.PopupResultPath()
+	os.Remove(resultPath)
+
+	executable, err := os.Executable()
+	if err != nil {
+		a.err = "failed to find executable"
+		return a, nil
+	}
+
+	popupArgs := []string{
+		executable, "popup-worktree",
+		"--project", project,
+		"--repo-root", repoRoot,
+		"--result-path", resultPath,
+	}
+
+	opts := tmux.PopupOpts{
+		Title:  "New Worktree in " + project,
+		Width:  60,
+		Height: 10,
+	}
+
+	if err := tmux.ShowPopup(opts, popupArgs...); err != nil {
+		a.err = "failed to open popup"
+		return a, nil
+	}
+
+	a.waitingPopup = true
+	a.err = ""
+	return a, checkPopupResult(resultPath)
+}
+
 func (a App) View() string {
 	var title string
 	if a.focused {
@@ -289,9 +365,9 @@ func (a App) View() string {
 	var statusLine string
 	if a.focused {
 		if a.err != "" {
-			statusLine = errStyle.Render("err: "+a.err) + "\n" + statusBarStyle.Render("[n]ew [N]ew project [d]el [q]uit")
+			statusLine = errStyle.Render("err: "+a.err) + "\n" + statusBarStyle.Render("[n]ew [N]ew project [w]orktree [d]el [q]uit")
 		} else {
-			statusLine = statusBarStyle.Render("[n]ew [N]ew project [d]el [q]uit")
+			statusLine = statusBarStyle.Render("[n]ew [N]ew project [w]orktree [d]el [q]uit")
 		}
 	} else {
 		if a.err != "" {

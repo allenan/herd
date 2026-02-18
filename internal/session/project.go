@@ -6,6 +6,16 @@ import (
 	"strings"
 )
 
+// DetectRepoRoot returns the absolute path of the git repository root,
+// or an empty string if dir is not inside a git repo.
+func DetectRepoRoot(dir string) string {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func DetectProject(dir string) string {
 	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
 	if err != nil {

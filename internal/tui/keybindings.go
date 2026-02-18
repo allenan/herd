@@ -9,6 +9,7 @@ type keyMap struct {
 	Space      key.Binding
 	New        key.Binding
 	NewProject key.Binding
+	Worktree   key.Binding
 	Delete     key.Binding
 	Quit       key.Binding
 }
@@ -37,6 +38,10 @@ var keys = keyMap{
 	NewProject: key.NewBinding(
 		key.WithKeys("N"),
 		key.WithHelp("N", "new project"),
+	),
+	Worktree: key.NewBinding(
+		key.WithKeys("w"),
+		key.WithHelp("w", "worktree"),
 	),
 	Delete: key.NewBinding(
 		key.WithKeys("d"),
