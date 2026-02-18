@@ -69,6 +69,7 @@ var (
 	statusInput        = lipgloss.NewStyle().Foreground(colorWarning).Render("!")
 	statusIdle         = lipgloss.NewStyle().Foreground(colorInactive).Render("●")
 	statusDone         = lipgloss.NewStyle().Foreground(colorTeal).Render("✓")
+	statusPlanReady    = lipgloss.NewStyle().Foreground(colorTeal).Render("◆")
 	statusExited       = lipgloss.NewStyle().Foreground(colorError).Render("x")
 	statusService      = lipgloss.NewStyle().Foreground(colorSuccess).Render("◉")
 

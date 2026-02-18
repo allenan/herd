@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -33,6 +34,8 @@ var idlePatterns = []string{
 	"? for help",
 }
 
+var planReadyPattern = regexp.MustCompile(`\.\S+/plans/\S+\.md`)
+
 // CapturePaneContent returns the visible text of a tmux pane.
 func CapturePaneContent(paneID string) (string, error) {
 	return TmuxRunOutput("capture-pane", "-t", paneID, "-p")
@@ -56,6 +59,11 @@ func DetectStatus(paneID string) session.Status {
 		if strings.Contains(content, pattern) {
 			return session.StatusRunning
 		}
+	}
+
+	// Check for plan-ready state — plan file path visible in pane
+	if planReadyPattern.MatchString(content) {
+		return session.StatusPlanReady
 	}
 
 	// Check for permission/input prompts (highest priority after running)

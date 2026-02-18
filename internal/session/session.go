@@ -11,10 +11,11 @@ const (
 	StatusRunning Status = "running"
 	StatusInput   Status = "input"
 	StatusIdle    Status = "idle"
-	StatusDone    Status = "done"
-	StatusExited  Status = "exited"
-	StatusShell   Status = "shell"
-	StatusService Status = "service"
+	StatusDone      Status = "done"
+	StatusPlanReady Status = "plan_ready"
+	StatusExited    Status = "exited"
+	StatusShell     Status = "shell"
+	StatusService   Status = "service"
 )
 
 type SessionType string

@@ -328,6 +328,8 @@ func statusIndicator(sess *session.Session, spinnerFrame string) string {
 		return statusService
 	case session.StatusDone:
 		return statusDone
+	case session.StatusPlanReady:
+		return statusPlanReady
 	case session.StatusInput:
 		return statusInput
 	case session.StatusExited:
