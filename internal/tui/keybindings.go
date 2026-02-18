@@ -14,6 +14,7 @@ type keyMap struct {
 	Delete     key.Binding
 	Search     key.Binding
 	Mute       key.Binding
+	Reload     key.Binding
 	Quit       key.Binding
 	Help       key.Binding
 }
@@ -62,6 +63,10 @@ var keys = keyMap{
 	Mute: key.NewBinding(
 		key.WithKeys("m"),
 		key.WithHelp("m", "mute"),
+	),
+	Reload: key.NewBinding(
+		key.WithKeys("R"),
+		key.WithHelp("R", "reload sidebar"),
 	),
 	Quit: key.NewBinding(
 		key.WithKeys("q"),

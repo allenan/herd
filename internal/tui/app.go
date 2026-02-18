@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/allenan/herd/internal/session"
-	"github.com/allenan/herd/internal/tmux"
+	htmux "github.com/allenan/herd/internal/tmux"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -41,20 +41,22 @@ type App struct {
 	prompt       PromptModel
 	spinner      spinner.Model
 	termSpinner  spinner.Model
-	manager      *tmux.Manager
+	manager      *htmux.Manager
 	width        int
 	height       int
 	defaultDir   string
 	profileName  string
-	err            string
-	focused        bool
-	waitingPopup   bool
-	showHelp       bool
-	pendingDelete  *session.Session
-	searchText     string
+	err              string
+	focused          bool
+	waitingPopup     bool
+	showHelp         bool
+	pendingDelete    *session.Session
+	searchText       string
+	binaryModTime    time.Time
+	updateAvailable  bool
 }
 
-func NewApp(manager *tmux.Manager, defaultDir, profileName string) App {
+func NewApp(manager *htmux.Manager, defaultDir, profileName string) App {
 	sidebar := NewSidebarModel()
 	sidebar.SetSessions(manager.ListSessions())
 	sidebar.SetActive(manager.State.LastActiveSession)
@@ -67,16 +69,24 @@ func NewApp(manager *tmux.Manager, defaultDir, profileName string) App {
 	ts.Spinner = terminalSpinner
 	ts.Style = statusRunningStyle
 
+	var modTime time.Time
+	if binPath, err := os.Executable(); err == nil {
+		if info, err := os.Stat(binPath); err == nil {
+			modTime = info.ModTime()
+		}
+	}
+
 	return App{
-		mode:        modeNormal,
-		sidebar:     sidebar,
-		prompt:      NewPromptModel(),
-		spinner:     s,
-		termSpinner: ts,
-		manager:     manager,
-		defaultDir:  defaultDir,
-		profileName: profileName,
-		focused:     true,
+		mode:          modeNormal,
+		sidebar:       sidebar,
+		prompt:        NewPromptModel(),
+		spinner:       s,
+		termSpinner:   ts,
+		manager:       manager,
+		defaultDir:    defaultDir,
+		profileName:   profileName,
+		focused:       true,
+		binaryModTime: modTime,
 	}
 }
 
@@ -136,6 +146,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if reconciled || refreshed {
 			a.sidebar.SetSessions(a.manager.ListSessions())
 		}
+		// Check if the on-disk binary has been updated
+		if !a.updateAvailable && !a.binaryModTime.IsZero() {
+			if binPath, err := os.Executable(); err == nil {
+				if info, err := os.Stat(binPath); err == nil {
+					if info.ModTime().After(a.binaryModTime) {
+						a.updateAvailable = true
+					}
+				}
+			}
+		}
 		return a, statusTick()
 	case spinner.TickMsg:
 		var cmd1, cmd2 tea.Cmd
@@ -144,7 +164,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmd1, cmd2)
 	case popupCheckMsg:
 		if a.waitingPopup {
-			return a, checkPopupResult(tmux.PopupResultPath())
+			return a, checkPopupResult(htmux.PopupResultPath())
 		}
 		return a, nil
 	case popupResultMsg:
@@ -205,7 +225,7 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Quit):
 			// Detach the user's terminal. The sidebar process keeps
 			// running inside tmux so state is preserved on re-attach.
-			tmux.TmuxRun("detach-client")
+			htmux.TmuxRun("detach-client")
 			return a, nil
 		case key.Matches(msg, keys.Up):
 			a.sidebar.MoveUp()
@@ -257,6 +277,9 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.manager.Notifier != nil {
 				a.manager.Notifier.SetMuted(!a.manager.Notifier.IsMuted())
 			}
+		case key.Matches(msg, keys.Reload):
+			htmux.ReloadSidebar(a.manager.State.SidebarPaneID, a.profileName)
+			return a, nil
 		case key.Matches(msg, keys.Help):
 			a.showHelp = !a.showHelp
 		}
@@ -316,14 +339,14 @@ func (a App) launchPopup(mode, dir, project string) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	if !tmux.TmuxSupportsPopup() {
+	if !htmux.TmuxSupportsPopup() {
 		// Fallback to inline prompt for old tmux
 		a.mode = modePrompt
 		a.prompt.Start(dir)
 		return a, a.prompt.dirInput.Focus()
 	}
 
-	resultPath := tmux.PopupResultPath()
+	resultPath := htmux.PopupResultPath()
 	// Remove any stale result file
 	os.Remove(resultPath)
 
@@ -351,13 +374,13 @@ func (a App) launchPopup(mode, dir, project string) (tea.Model, tea.Cmd) {
 		title = "New Session in " + project
 	}
 
-	opts := tmux.PopupOpts{
+	opts := htmux.PopupOpts{
 		Title:  title,
 		Width:  60,
 		Height: 18,
 	}
 
-	if err := tmux.ShowPopup(opts, popupArgs...); err != nil {
+	if err := htmux.ShowPopup(opts, popupArgs...); err != nil {
 		a.err = "failed to open popup"
 		return a, nil
 	}
@@ -416,12 +439,12 @@ func (a App) launchWorktreePopup(project, repoRoot string) (tea.Model, tea.Cmd) 
 		return a, nil
 	}
 
-	if !tmux.TmuxSupportsPopup() {
+	if !htmux.TmuxSupportsPopup() {
 		a.err = "worktrees require tmux >= 3.2"
 		return a, nil
 	}
 
-	resultPath := tmux.PopupResultPath()
+	resultPath := htmux.PopupResultPath()
 	os.Remove(resultPath)
 
 	executable, err := os.Executable()
@@ -440,13 +463,13 @@ func (a App) launchWorktreePopup(project, repoRoot string) (tea.Model, tea.Cmd) 
 		popupArgs = append(popupArgs, "--profile", a.profileName)
 	}
 
-	opts := tmux.PopupOpts{
+	opts := htmux.PopupOpts{
 		Title:  "New Worktree in " + project,
 		Width:  60,
 		Height: 10,
 	}
 
-	if err := tmux.ShowPopup(opts, popupArgs...); err != nil {
+	if err := htmux.ShowPopup(opts, popupArgs...); err != nil {
 		a.err = "failed to open popup"
 		return a, nil
 	}
@@ -471,6 +494,7 @@ func (a App) renderHelp() string {
 		hintStyle.Render("t      terminal"),
 		hintStyle.Render("d      delete (confirms)"),
 		hintStyle.Render("m      mute"),
+		hintStyle.Render("R      reload sidebar"),
 		hintStyle.Render("q      quit"),
 		hintStyle.Render("?      close"),
 	}
@@ -515,6 +539,10 @@ func (a App) View() string {
 			statusLine = searchStyle.Render("/ "+a.sidebar.Filter()) + "  " + statusBarStyle.PaddingTop(0).Render("? shortcuts")
 		} else {
 			statusLine = statusBarStyle.Render("? shortcuts")
+		}
+		if a.updateAvailable && !a.showHelp && a.pendingDelete == nil && a.mode != modeSearch {
+			updateHint := lipgloss.NewStyle().Foreground(colorWarning).PaddingLeft(1).PaddingTop(0).Render("↑ update (R)")
+			statusLine = updateHint + "  " + statusLine
 		}
 		if a.err != "" {
 			statusLine = errStyle.Render("err: "+a.err) + "\n" + statusLine
