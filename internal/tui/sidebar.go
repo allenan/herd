@@ -217,6 +217,9 @@ func (m SidebarModel) View(width, height int, focused bool, spinnerFrame string)
 
 		switch item.kind {
 		case itemProject:
+			if i > 0 {
+				s += "\n"
+			}
 			s += m.renderProject(item.project, isCursor, focused) + "\n"
 		case itemSession:
 			isActive := item.session != nil && item.session.ID == m.activeID

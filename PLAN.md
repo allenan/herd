@@ -447,13 +447,13 @@ tmux installed automatically as dependency. First run auto-installs Claude Code 
 | Project detection | internal/session/project.go | git rev-parse --show-toplevel |
 | Tree view | internal/tui/sidebar.go | Group by project, collapse/expand |
 | Pane polling | internal/tmux/capture.go | capture-pane every 2s, pattern match |
-| Hook installer | internal/hooks/installer.go | Merge into ~/.claude/settings.json |
-| Socket listener | internal/hooks/listener.go | Listen on /tmp/herd.sock |
-| Notify subcommand | cmd/notify.go | Read stdin JSON, write to socket |
+| ~~Hook installer~~ | ~~internal/hooks/installer.go~~ | Deferred — polling works well enough |
+| ~~Socket listener~~ | ~~internal/hooks/listener.go~~ | Deferred — nice-to-have for lower latency |
+| ~~Notify subcommand~~ | ~~cmd/notify.go~~ | Deferred |
 | Status indicators | internal/tui/sidebar.go | Based on session state |
-| Desktop notifications | internal/notify/desktop.go | osascript on mac, notify-send on linux |
+| ~~Desktop notifications~~ | ~~internal/notify/desktop.go~~ | Deferred — users can configure independently in ~/.claude/settings.json |
 
-**Test**: Two sessions. Trigger permission prompt in one. Bell appears in sidebar within 1s. Desktop notification fires. Switch to it, approve, bell clears.
+**Test**: Two sessions. Trigger permission prompt in one. Bell appears in sidebar within 2s (polling). Switch to it, approve, bell clears.
 
 ### Phase 3: Worktrees + polish (2-3 days)
 
@@ -463,10 +463,10 @@ tmux installed automatically as dependency. First run auto-installs Claude Code 
 |------|---------|-------|
 | Worktree create/remove | internal/worktree/ | git worktree add/remove |
 | `w` keybinding | keybindings.go | New-with-worktree flow |
-| Delete session (`d`) | tui/prompt.go | Confirmation, worktree cleanup |
-| Rename session (`r`) | tui/prompt.go | Inline text input |
+| ~~Delete session (`d`)~~ | ~~tui/prompt.go~~ | Done — kills pane, removes from state, handles viewport swap. Confirmation prompt is a nice-to-have. |
+| ~~Rename session (`r`)~~ | ~~tui/prompt.go~~ | Not needed — names auto-derived from Claude Code tab title |
 | Fuzzy search (`/`) | tui/sidebar.go | Filter tree with text input |
-| State reconciliation | session/reconcile.go | Sync state.json with live tmux |
+| ~~State reconciliation~~ | ~~session/reconcile.go~~ | Done — backup on save, corrupt recovery in LoadState, orphan adoption via Reconcile() on startup + every 2s poll. |
 | `herd list --json` | cmd/list.go | For status bar integration |
 | `herd new` | cmd/new.go | Headless session creation |
 

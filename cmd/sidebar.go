@@ -23,6 +23,7 @@ func runSidebar() error {
 	}
 
 	manager := htmux.NewManager(client, state, statePath)
+	manager.Reconcile()
 
 	// Default directory for new sessions: use the directory herd was launched from
 	defaultDir, err := os.Getwd()

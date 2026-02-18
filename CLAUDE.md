@@ -11,6 +11,7 @@ Herd is a TUI for managing multiple Claude Code sessions, grouped by project. It
 ```bash
 make build     # builds ./herd binary
 make run       # builds + runs
+make reload    # builds + hot-swaps sidebar (keeps all sessions alive)
 make vet       # go vet ./...
 make kill      # kills the herd tmux server
 make clean     # removes binary
@@ -39,11 +40,13 @@ Sessions are tmux windows created with `tmux new-window -d` running `claude`. Sw
 - **`cmd/`** — Cobra commands. `root.go` handles main launch + `--sidebar` flag dispatch. `sidebar.go` starts the Bubble Tea program.
 - **`internal/tmux/`** — All tmux interaction. `server.go` manages the socket/server lifecycle. `layout.go` creates the two-pane split. `manager.go` contains session CRUD (create, switch, kill) using pane-swap strategy.
 - **`internal/tui/`** — Bubble Tea UI. `app.go` is the top-level model with normal/prompt modes. `sidebar.go` renders the session list. `prompt.go` handles inline new-session creation (dir → name two-step flow).
-- **`internal/session/`** — Data types and persistence. `store.go` handles JSON state read/write with atomic rename. `project.go` detects git project name and branch from a directory.
+- **`internal/session/`** — Data types and persistence. `store.go` handles JSON state read/write with atomic rename and backup. `project.go` detects git project name and branch from a directory. `reconcile.go` adopts orphan tmux panes and prunes dead sessions.
 
 ### State files
 
 - `~/.herd/state.json` — Session metadata, pane IDs, active session
+- `~/.herd/state.json.bak` — Backup created on every save (used for recovery)
+- `~/.herd/state.json.corrupt.<timestamp>` — Archived corrupt state files (for inspection)
 - `~/.herd/tmux.sock` — Tmux socket (dedicated server, isolated from user's tmux)
 - `~/.herd/debug.log` — Debug logging from the manager
 
@@ -71,15 +74,27 @@ Window 0 must always have exactly two panes: sidebar (left) + viewport (right). 
 - Pane sizes set via `split-window -l` on a detached session are proportionally scaled when a client attaches. Use tmux hooks (`client-attached`, `client-resized`) to enforce fixed pane widths.
 - When debugging visual anomalies (duplicate UI, wrong sizes), check `ps aux | grep herd` for orphan processes first — `make kill` failures silently leave servers and sidebars running.
 
+## State resilience
+
+Sessions survive any state failure. Defense in depth:
+
+1. **Atomic writes** — `Save()` writes to `.tmp` then renames (existing).
+2. **Backup on every save** — `state.json` is copied to `state.json.bak` before each write (read+write, not rename, so the primary is never missing).
+3. **Graceful corrupt recovery** — `LoadState()` falls back: primary → `.bak` → empty state. Corrupt files are archived as `state.json.corrupt.<timestamp>`.
+4. **Reconciliation** — `Manager.Reconcile()` compares state against live tmux panes. Prunes dead sessions, adopts orphan claude panes (detected via `CurrentCommand`/`StartCommand` containing "claude"). Runs on startup and every 2s in the polling loop.
+5. **`reloadState()`** — re-reads state from disk and prunes sessions with dead panes before every manager operation (existing).
+
+Net effect: deleting `state.json` while herd is running recovers all sessions within 2s.
+
 ## Implementation status
 
 See `PLAN.md` for the full roadmap. Current status by phase:
 
 **Phase 1 (Walking skeleton) — Complete.** Tmux server bootstrap, two-pane layout, session CRUD, sidebar TUI, JSON state persistence, `herd` / `herd --sidebar` commands.
 
-**Phase 2 (Grouping + notifications) — Partially complete.** Done: project detection, tree view with collapse/expand, pane polling via `capture-pane` every 2s, status indicators. Not started: `internal/hooks/` (installer + socket listener), `internal/notify/` (desktop notifications), `cmd/notify.go` (`herd notify` subcommand).
+**Phase 2 (Grouping + notifications) — Effectively complete.** Done: project detection, tree view with collapse/expand, pane polling via `capture-pane` every 2s, status indicators. Deferred (nice-to-have): `internal/hooks/` (installer + socket listener), `internal/notify/` (desktop notifications), `cmd/notify.go` (`herd notify` subcommand) — the hook-based approach would be faster/more reliable than polling, but polling works well enough and desktop notifications can be configured independently in `~/.claude/settings.json`.
 
-**Phase 3 (Worktrees + polish) — Not started.** Missing: `internal/worktree/`, `session/reconcile.go`, `cmd/new.go`, `cmd/list.go`, `cmd/cleanup.go`, keybindings for `w` (worktree), `r` (rename), `/` (fuzzy search), `?` (help), delete confirmation prompt.
+**Phase 3 (Worktrees + polish) — Partially complete.** Done: delete session (`d` key, cleans up pane + state), state reconciliation (orphan adoption, dead session pruning, backup/corrupt recovery). Not needed: rename session (names auto-derived from Claude Code tab title). Missing: `internal/worktree/`, `cmd/new.go`, `cmd/list.go`, `cmd/cleanup.go`, keybindings for `w` (worktree), `/` (fuzzy search), `?` (help). Nice-to-have: delete confirmation prompt.
 
 **Phase 4 (Ship) — Not started.** Missing: `.goreleaser.yml`, `.github/workflows/`, `README.md`, Homebrew tap, `--version` flag.
 
