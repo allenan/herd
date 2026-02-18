@@ -59,4 +59,27 @@ var (
 	statusIdle         = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("●")
 	statusDone         = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render("✓")
 	statusExited       = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("x")
+
+	// Project header styles
+	projectHeaderStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("39")).
+				Bold(true).
+				PaddingLeft(1)
+
+	projectHeaderBlurredStyle = lipgloss.NewStyle().
+					Faint(true).
+					PaddingLeft(1)
+
+	// Session count shown after project name
+	sessionCountStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("241"))
+
+	sessionCountBlurredStyle = lipgloss.NewStyle().
+					Faint(true)
+
+	// Chevron styles
+	chevronStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+
+	// Cursor indicator
+	cursorGlyph = lipgloss.NewStyle().Foreground(lipgloss.Color("170")).Bold(true).Render("▸")
 )

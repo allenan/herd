@@ -115,7 +115,9 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Down):
 			a.sidebar.MoveDown()
 		case key.Matches(msg, keys.Enter):
-			if sel := a.sidebar.Selected(); sel != nil {
+			if a.sidebar.IsOnProject() {
+				a.sidebar.ToggleCollapse()
+			} else if sel := a.sidebar.Selected(); sel != nil {
 				if err := a.manager.SwitchTo(sel.ID); err != nil {
 					a.err = err.Error()
 				} else {
@@ -123,6 +125,8 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.sidebar.SetActive(sel.ID)
 				}
 			}
+		case key.Matches(msg, keys.Space):
+			a.sidebar.ToggleCollapse()
 		case key.Matches(msg, keys.New):
 			a.mode = modePrompt
 			a.prompt.Start(a.defaultDir)
