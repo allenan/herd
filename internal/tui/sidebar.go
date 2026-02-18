@@ -179,12 +179,36 @@ func (m *SidebarModel) sessionCount(project string) int {
 	return count
 }
 
+// CurrentProjectInfo returns the project name and directory for the item at the cursor.
+// For project headers, it uses the first session's dir. For sessions, uses that session's dir.
+func (m *SidebarModel) CurrentProjectInfo() (project, dir string) {
+	if len(m.items) == 0 || m.cursor >= len(m.items) {
+		return "", ""
+	}
+	item := m.items[m.cursor]
+	projectName := item.project
+
+	// Find the first session in this project to get the directory
+	for _, s := range m.sessions {
+		if s.Project == projectName {
+			return projectName, s.Dir
+		}
+	}
+
+	return projectName, ""
+}
+
+// HasSessions returns true if there are any sessions.
+func (m *SidebarModel) HasSessions() bool {
+	return len(m.sessions) > 0
+}
+
 func (m SidebarModel) View(width, height int, focused bool, spinnerFrame string) string {
 	if len(m.sessions) == 0 {
 		if focused {
-			return normalStyle.Render("  No sessions yet.\n  Press n to create one.")
+			return normalStyle.Render(" No sessions yet.\n Press n to create one.")
 		}
-		return normalBlurredStyle.Render("  No sessions yet.")
+		return normalBlurredStyle.Render(" No sessions yet.")
 	}
 
 	var s string
@@ -203,33 +227,29 @@ func (m SidebarModel) View(width, height int, focused bool, spinnerFrame string)
 }
 
 func (m SidebarModel) renderProject(project string, isCursor, focused bool) string {
-	chevron := chevronStyle.Render("▼")
+	chevronChar := "▼"
 	if m.collapsed[project] {
-		chevron = chevronStyle.Render("▶")
+		chevronChar = "▶"
 	}
 	count := fmt.Sprintf("(%d)", m.sessionCount(project))
 
-	var glyph string
-	if isCursor {
-		glyph = cursorGlyph + " "
-	} else {
-		glyph = "  "
-	}
-
 	if focused {
 		if isCursor {
+			chevron := selectedStyle.Render(chevronChar)
 			countStr := sessionCountStyle.Render(count)
 			name := selectedStyle.Render(project)
-			return fmt.Sprintf("  %s %s %s %s", glyph, chevron, name, countStr)
+			return fmt.Sprintf(" %s %s %s", chevron, name, countStr)
 		}
+		chevron := chevronStyle.Render(chevronChar)
 		countStr := sessionCountStyle.Render(count)
 		name := projectHeaderStyle.Render(project)
-		return fmt.Sprintf("  %s %s %s %s", glyph, chevron, name, countStr)
+		return fmt.Sprintf(" %s %s %s", chevron, name, countStr)
 	}
 
+	chevron := chevronStyle.Render(chevronChar)
 	countStr := sessionCountBlurredStyle.Render(count)
 	name := projectHeaderBlurredStyle.Render(project)
-	return fmt.Sprintf("  %s %s %s %s", glyph, chevron, name, countStr)
+	return fmt.Sprintf(" %s %s %s", chevron, name, countStr)
 }
 
 func truncate(s string, max int) string {
@@ -272,7 +292,7 @@ func (m SidebarModel) renderSession(sess *session.Session, isCursor, focused, is
 		}
 	}
 
-	return fmt.Sprintf("  %s %s %s", glyph, indicator, name)
+	return fmt.Sprintf(" %s %s %s", glyph, indicator, name)
 }
 
 func statusIndicator(status session.Status, spinnerFrame string) string {

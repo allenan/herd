@@ -71,6 +71,22 @@ Window 0 must always have exactly two panes: sidebar (left) + viewport (right). 
 - Pane sizes set via `split-window -l` on a detached session are proportionally scaled when a client attaches. Use tmux hooks (`client-attached`, `client-resized`) to enforce fixed pane widths.
 - When debugging visual anomalies (duplicate UI, wrong sizes), check `ps aux | grep herd` for orphan processes first — `make kill` failures silently leave servers and sidebars running.
 
-## Planned but not yet implemented
+## Implementation status
 
-See `PLAN.md` for the full roadmap. Not yet built: notification hooks, git worktree integration, fuzzy search, pane capture polling, desktop notifications, state reconciliation, GoReleaser packaging.
+See `PLAN.md` for the full roadmap. Current status by phase:
+
+**Phase 1 (Walking skeleton) — Complete.** Tmux server bootstrap, two-pane layout, session CRUD, sidebar TUI, JSON state persistence, `herd` / `herd --sidebar` commands.
+
+**Phase 2 (Grouping + notifications) — Partially complete.** Done: project detection, tree view with collapse/expand, pane polling via `capture-pane` every 2s, status indicators. Not started: `internal/hooks/` (installer + socket listener), `internal/notify/` (desktop notifications), `cmd/notify.go` (`herd notify` subcommand).
+
+**Phase 3 (Worktrees + polish) — Not started.** Missing: `internal/worktree/`, `session/reconcile.go`, `cmd/new.go`, `cmd/list.go`, `cmd/cleanup.go`, keybindings for `w` (worktree), `r` (rename), `/` (fuzzy search), `?` (help), delete confirmation prompt.
+
+**Phase 4 (Ship) — Not started.** Missing: `.goreleaser.yml`, `.github/workflows/`, `README.md`, Homebrew tap, `--version` flag.
+
+### Divergences from PLAN.md
+
+- **State path**: Plan says `~/.config/herd/`, implementation uses `~/.herd/`.
+- **Session naming**: Plan had a 3-step prompt (dir → name → worktree). Implementation uses a single-step directory prompt with auto-naming via OSC terminal title polling (`CapturePaneTitle` + `CleanPaneTitle`).
+- **Extra status**: `StatusDone` (`✓`, blue) was added beyond the plan's four states — represents "Claude finished while you weren't looking".
+- **Status glyphs differ from plan**: Plan said `o` for idle, implementation uses `●` (gray). Plan said `*` for running, implementation uses an animated spinner.
+- **No worktree fields on Session struct** — `IsWorktree`/`WorktreeBranch` omitted since worktrees aren't implemented yet.
