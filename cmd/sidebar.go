@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/allenan/herd/internal/notify"
 	"github.com/allenan/herd/internal/profile"
 	"github.com/allenan/herd/internal/session"
 	htmux "github.com/allenan/herd/internal/tmux"
@@ -32,6 +33,7 @@ func runSidebar() error {
 	}
 
 	manager := htmux.NewManager(client, state, statePath)
+	manager.Notifier = notify.New()
 	manager.Reconcile()
 
 	// Default directory for new sessions: use the directory herd was launched from
