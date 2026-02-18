@@ -13,14 +13,16 @@ const (
 )
 
 type Session struct {
-	ID          string    `json:"id"`
-	TmuxPaneID  string    `json:"tmux_pane_id"`
-	Project     string    `json:"project"`
-	Name        string    `json:"name"`
-	Title       string    `json:"title,omitempty"`
-	Dir         string    `json:"dir"`
-	CreatedAt   time.Time `json:"created_at"`
-	Status      Status    `json:"status"`
+	ID             string    `json:"id"`
+	TmuxPaneID     string    `json:"tmux_pane_id"`
+	Project        string    `json:"project"`
+	Name           string    `json:"name"`
+	Title          string    `json:"title,omitempty"`
+	Dir            string    `json:"dir"`
+	CreatedAt      time.Time `json:"created_at"`
+	Status         Status    `json:"status"`
+	IsWorktree     bool      `json:"is_worktree,omitempty"`
+	WorktreeBranch string    `json:"worktree_branch,omitempty"`
 }
 
 // DisplayName returns the Title if set (from Claude Code's terminal title),

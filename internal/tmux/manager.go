@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/allenan/herd/internal/session"
+	"github.com/allenan/herd/internal/worktree"
 	gotmux "github.com/GianlucaP106/gotmux/gotmux"
 	"github.com/google/uuid"
 )
@@ -209,6 +210,78 @@ func (m *Manager) CreateSession(dir, name string) (*session.Session, error) {
 	return &newSession, nil
 }
 
+// CreateWorktreeSession creates a git worktree and launches a Claude Code session in it.
+func (m *Manager) CreateWorktreeSession(repoRoot, branch string) (*session.Session, error) {
+	m.reloadState()
+
+	debugLog.Printf("CreateWorktreeSession: repoRoot=%s branch=%s", repoRoot, branch)
+
+	wtDir, err := worktree.Create(repoRoot, branch)
+	if err != nil {
+		debugLog.Printf("CreateWorktreeSession: worktree create failed: %v", err)
+		return nil, fmt.Errorf("failed to create worktree: %w", err)
+	}
+
+	project := session.DetectProject(repoRoot)
+	windowName := fmt.Sprintf("%s/%s", project, branch)
+
+	if err := TmuxRun(
+		"new-window", "-d",
+		"-t", "herd-main",
+		"-n", windowName,
+		"-c", wtDir,
+		"claude",
+	); err != nil {
+		debugLog.Printf("CreateWorktreeSession: new-window failed: %v, rolling back worktree", err)
+		worktree.Remove(repoRoot, wtDir)
+		return nil, fmt.Errorf("failed to create tmux window: %w", err)
+	}
+
+	// Find the new window's pane ID
+	sess, err := m.Client.GetSessionByName("herd-main")
+	if err != nil || sess == nil {
+		worktree.Remove(repoRoot, wtDir)
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+
+	windows, err := sess.ListWindows()
+	if err != nil {
+		worktree.Remove(repoRoot, wtDir)
+		return nil, fmt.Errorf("failed to list windows: %w", err)
+	}
+
+	if len(windows) == 0 {
+		worktree.Remove(repoRoot, wtDir)
+		return nil, fmt.Errorf("no windows found after creation")
+	}
+
+	newWindow := windows[len(windows)-1]
+	panes, err := newWindow.ListPanes()
+	if err != nil || len(panes) == 0 {
+		worktree.Remove(repoRoot, wtDir)
+		return nil, fmt.Errorf("failed to get pane for new window")
+	}
+
+	newSession := session.Session{
+		ID:             uuid.New().String(),
+		TmuxPaneID:     panes[0].Id,
+		Project:        project,
+		Name:           branch,
+		Dir:            wtDir,
+		CreatedAt:      time.Now(),
+		Status:         session.StatusRunning,
+		IsWorktree:     true,
+		WorktreeBranch: branch,
+	}
+
+	debugLog.Printf("CreateWorktreeSession: created session %s pane=%s worktree=%s", newSession.ID, newSession.TmuxPaneID, wtDir)
+
+	m.State.AddSession(newSession)
+	m.SwitchTo(newSession.ID)
+	m.State.Save(m.StatePath)
+	return &newSession, nil
+}
+
 func (m *Manager) SwitchTo(sessionID string) error {
 	m.reloadState()
 
@@ -289,6 +362,8 @@ func (m *Manager) KillSession(sessionID string) error {
 
 	isInViewport := sess.TmuxPaneID == m.State.ViewportPaneID
 	paneID := sess.TmuxPaneID
+	isWorktree := sess.IsWorktree
+	sessDir := sess.Dir
 
 	// Remove from state first
 	m.State.RemoveSession(sessionID)
@@ -344,6 +419,18 @@ func (m *Manager) KillSession(sessionID string) error {
 			debugLog.Printf("KillSession: kill-pane %s failed: %v", paneID, err)
 		} else {
 			debugLog.Printf("KillSession: killed pane %s", paneID)
+		}
+	}
+
+	// Clean up git worktree if this was a worktree session
+	if isWorktree && sessDir != "" {
+		repoRoot := worktree.RepoRootFromWorktreeDir(sessDir)
+		if repoRoot != "" {
+			if err := worktree.Remove(repoRoot, sessDir); err != nil {
+				debugLog.Printf("KillSession: worktree remove failed (non-fatal): %v", err)
+			} else {
+				debugLog.Printf("KillSession: removed worktree %s", sessDir)
+			}
 		}
 	}
 
@@ -413,6 +500,21 @@ func (m *Manager) Reconcile() bool {
 	}
 
 	changed := m.State.Reconcile(livePanes, layoutPaneIDs)
+
+	// Post-process: tag untagged worktree sessions
+	for i := range m.State.Sessions {
+		s := &m.State.Sessions[i]
+		if !s.IsWorktree && worktree.IsWorktreeDir(s.Dir) {
+			s.IsWorktree = true
+			s.WorktreeBranch = worktree.DetectBranchFromDir(s.Dir)
+			if s.WorktreeBranch != "" {
+				s.Name = s.WorktreeBranch
+			}
+			debugLog.Printf("Reconcile: tagged session %s as worktree (branch=%s)", s.ID, s.WorktreeBranch)
+			changed = true
+		}
+	}
+
 	if changed {
 		debugLog.Printf("Reconcile: state changed, saving")
 		m.State.Save(m.StatePath)
