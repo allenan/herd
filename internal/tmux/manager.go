@@ -454,12 +454,8 @@ func (m *Manager) KillSession(sessionID string) error {
 	} else if isInViewport {
 		// No sessions left — respawn the viewport pane with placeholder
 		// instead of killing it, so the two-pane layout stays intact.
-		placeholderCmd := `printf '\033[?25l\n\n        \033[1;38;5;205m🐕 herd\033[0m\n\n    \033[38;5;241mCreate a session to get started.\n    Press n in the sidebar.\033[0m\n'; exec cat`
-		if err := TmuxRun("respawn-pane", "-k", "-t", paneID, "sh", "-c", placeholderCmd); err != nil {
-			debugLog.Printf("KillSession: respawn-pane placeholder failed: %v", err)
-		} else {
-			debugLog.Printf("KillSession: respawned viewport pane %s with placeholder", paneID)
-		}
+		ShowPlaceholder(paneID)
+		debugLog.Printf("KillSession: respawned viewport pane %s with placeholder", paneID)
 		m.State.LastActiveSession = ""
 		TmuxRun("select-pane", "-t", m.State.SidebarPaneID)
 	} else {

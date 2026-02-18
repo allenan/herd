@@ -162,10 +162,16 @@ func SetupLayout(client *gotmux.Tmux, profileName string) (sidebarPaneID string,
 	return sidebarPaneID, viewportPaneID, nil
 }
 
-// ShowPlaceholder replaces the viewport pane content with the welcome message.
+// ShowPlaceholder replaces the viewport pane content with the responsive ASCII art welcome screen.
 func ShowPlaceholder(paneID string) {
-	placeholderCmd := "printf '\\033[?25l\\n\\n        \\033[1;38;5;205m🐕 herd\\033[0m\\n\\n    \\033[38;5;241mCreate a session to get started.\\n    Press n in the sidebar.\\033[0m\\n'; exec cat"
-	TmuxRun("respawn-pane", "-k", "-t", paneID, "sh", "-c", placeholderCmd)
+	selfBin, err := os.Executable()
+	if err != nil {
+		// Fallback to simple placeholder if we can't resolve our own binary
+		TmuxRun("respawn-pane", "-k", "-t", paneID, "sh", "-c",
+			"printf '\\033[?25l\\n\\n        \\033[1;38;5;243mherd\\033[0m\\n\\n    \\033[38;5;245mPress n to create a session\\033[0m\\n'; exec cat")
+		return
+	}
+	TmuxRun("respawn-pane", "-k", "-t", paneID, selfBin, "placeholder")
 }
 
 func HasLayout(client *gotmux.Tmux) bool {
