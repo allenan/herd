@@ -113,8 +113,11 @@ func SetupLayout(client *gotmux.Tmux) (sidebarPaneID string, viewportPaneID stri
 	// Enable focus events so panes receive focus-in/out escape sequences
 	client.Command("set-option", "-t", "herd-main", "focus-events", "on")
 
-	// Bind Ctrl-] to jump back to the sidebar pane (no prefix needed)
-	client.Command("bind-key", "-n", "C-]", "select-pane", "-t", sidebarPaneID)
+	// Bind Ctrl-h / Ctrl-Left to focus sidebar, Ctrl-l / Ctrl-Right to focus viewport
+	client.Command("bind-key", "-n", "C-h", "select-pane", "-L")
+	client.Command("bind-key", "-n", "C-Left", "select-pane", "-L")
+	client.Command("bind-key", "-n", "C-l", "select-pane", "-R")
+	client.Command("bind-key", "-n", "C-Right", "select-pane", "-R")
 
 	// Enable mouse mode for click-to-focus and scroll
 	client.Command("set-option", "-t", "herd-main", "mouse", "on")

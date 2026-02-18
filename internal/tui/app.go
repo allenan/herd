@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"encoding/json"
+	"os"
 	"time"
 
 	"github.com/allenan/herd/internal/tmux"
@@ -25,16 +27,17 @@ var claudeSpinner = spinner.Spinner{
 }
 
 type App struct {
-	mode       mode
-	sidebar    SidebarModel
-	prompt     PromptModel
-	spinner    spinner.Model
-	manager    *tmux.Manager
-	width      int
-	height     int
-	defaultDir string
-	err        string
-	focused    bool
+	mode         mode
+	sidebar      SidebarModel
+	prompt       PromptModel
+	spinner      spinner.Model
+	manager      *tmux.Manager
+	width        int
+	height       int
+	defaultDir   string
+	err          string
+	focused      bool
+	waitingPopup bool
 }
 
 func NewApp(manager *tmux.Manager, defaultDir string) App {
@@ -65,6 +68,31 @@ func statusTick() tea.Cmd {
 	})
 }
 
+// popupResultMsg is sent when the popup process writes a result file.
+type popupResultMsg struct {
+	Dir  string
+	Mode string
+}
+
+// popupCheckMsg triggers re-checking for the popup result file.
+type popupCheckMsg struct{}
+
+// checkPopupResult returns a command that polls for the popup result file.
+func checkPopupResult(resultPath string) tea.Cmd {
+	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
+		data, err := os.ReadFile(resultPath)
+		if err != nil {
+			return popupCheckMsg{} // keep polling
+		}
+		os.Remove(resultPath)
+		var result PopupResult
+		if err := json.Unmarshal(data, &result); err != nil {
+			return popupCheckMsg{}
+		}
+		return popupResultMsg{Dir: result.Dir, Mode: result.Mode}
+	})
+}
+
 func (a App) Init() tea.Cmd {
 	return tea.Batch(tea.EnableReportFocus, statusTick(), a.spinner.Tick)
 }
@@ -91,6 +119,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.spinner, cmd = a.spinner.Update(msg)
 		return a, cmd
+	case popupCheckMsg:
+		if a.waitingPopup {
+			return a, checkPopupResult(tmux.PopupResultPath())
+		}
+		return a, nil
+	case popupResultMsg:
+		if !a.waitingPopup {
+			return a, nil
+		}
+		a.waitingPopup = false
+		a.manager.CreateSession(msg.Dir, "New Session")
+		a.sidebar.SetSessions(a.manager.ListSessions())
+		a.sidebar.SetActive(a.manager.State.LastActiveSession)
+		a.err = ""
+		return a, nil
 	}
 
 	switch a.mode {
@@ -127,10 +170,19 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.Space):
 			a.sidebar.ToggleCollapse()
+		case key.Matches(msg, keys.NewProject):
+			return a.launchPopup("new_project", a.defaultDir, "")
 		case key.Matches(msg, keys.New):
-			a.mode = modePrompt
-			a.prompt.Start(a.defaultDir)
-			return a, a.prompt.dirInput.Focus()
+			if !a.sidebar.HasSessions() {
+				// No sessions — behave like N (new project)
+				return a.launchPopup("new_project", a.defaultDir, "")
+			}
+			// On a project or session — add session to that project
+			project, dir := a.sidebar.CurrentProjectInfo()
+			if dir == "" {
+				dir = a.defaultDir
+			}
+			return a.launchPopup("add_session", dir, project)
 		case key.Matches(msg, keys.Delete):
 			if sel := a.sidebar.Selected(); sel != nil {
 				a.manager.KillSession(sel.ID)
@@ -163,6 +215,59 @@ func (a App) updatePrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
+func (a App) launchPopup(mode, dir, project string) (tea.Model, tea.Cmd) {
+	if a.waitingPopup {
+		return a, nil
+	}
+
+	if !tmux.TmuxSupportsPopup() {
+		// Fallback to inline prompt for old tmux
+		a.mode = modePrompt
+		a.prompt.Start(dir)
+		return a, a.prompt.dirInput.Focus()
+	}
+
+	resultPath := tmux.PopupResultPath()
+	// Remove any stale result file
+	os.Remove(resultPath)
+
+	executable, err := os.Executable()
+	if err != nil {
+		a.err = "failed to find executable"
+		return a, nil
+	}
+
+	popupArgs := []string{
+		executable, "popup-new",
+		"--mode", mode,
+		"--dir", dir,
+		"--result-path", resultPath,
+	}
+	if project != "" {
+		popupArgs = append(popupArgs, "--project", project)
+	}
+
+	title := "New Project"
+	if mode == "add_session" && project != "" {
+		title = "New Session in " + project
+	}
+
+	opts := tmux.PopupOpts{
+		Title:  title,
+		Width:  60,
+		Height: 18,
+	}
+
+	if err := tmux.ShowPopup(opts, popupArgs...); err != nil {
+		a.err = "failed to open popup"
+		return a, nil
+	}
+
+	a.waitingPopup = true
+	a.err = ""
+	return a, checkPopupResult(resultPath)
+}
+
 func (a App) View() string {
 	var title string
 	if a.focused {
@@ -183,15 +288,15 @@ func (a App) View() string {
 	var statusLine string
 	if a.focused {
 		if a.err != "" {
-			statusLine = errStyle.Render("err: "+a.err) + "\n" + statusBarStyle.Render("[n]ew [d]el [q]uit")
+			statusLine = errStyle.Render("err: "+a.err) + "\n" + statusBarStyle.Render("[n]ew [N]ew project [d]el [q]uit")
 		} else {
-			statusLine = statusBarStyle.Render("[n]ew [d]el [q]uit")
+			statusLine = statusBarStyle.Render("[n]ew [N]ew project [d]el [q]uit")
 		}
 	} else {
 		if a.err != "" {
-			statusLine = errBlurredStyle.Render("err: "+a.err) + "\n" + statusBarBlurredStyle.Render("ctrl-] sidebar")
+			statusLine = errBlurredStyle.Render("err: "+a.err) + "\n" + statusBarBlurredStyle.Render("ctrl-h sidebar")
 		} else {
-			statusLine = statusBarBlurredStyle.Render("ctrl-] sidebar")
+			statusLine = statusBarBlurredStyle.Render("ctrl-h sidebar")
 		}
 	}
 	hints := statusLine
