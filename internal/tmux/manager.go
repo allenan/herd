@@ -355,6 +355,71 @@ func (m *Manager) ListSessions() []session.Session {
 	return m.State.Sessions
 }
 
+// CollectLivePanes queries tmux for all panes in herd-main, returning them
+// as session.LivePane values with pre-cleaned titles.
+func (m *Manager) CollectLivePanes() ([]session.LivePane, error) {
+	// List all panes across all windows in herd-main.
+	// Format: pane_id, window_index, pane_current_command, pane_start_command, pane_current_path, pane_title
+	out, err := TmuxRunOutput(
+		"list-panes", "-s", "-t", "herd-main",
+		"-F", "#{pane_id}\t#{window_index}\t#{pane_current_command}\t#{pane_start_command}\t#{pane_current_path}\t#{pane_title}",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list-panes failed: %w", err)
+	}
+	var panes []session.LivePane
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 6)
+		if len(parts) < 6 {
+			continue
+		}
+		var winIdx int
+		fmt.Sscanf(parts[1], "%d", &winIdx)
+		panes = append(panes, session.LivePane{
+			PaneID:         parts[0],
+			WindowIndex:    winIdx,
+			CurrentCommand: parts[2],
+			StartCommand:   parts[3],
+			CurrentPath:    parts[4],
+			Title:          CleanPaneTitle(parts[5]),
+		})
+	}
+	return panes, nil
+}
+
+// Reconcile reloads state, collects live panes, and reconciles them.
+// Returns true if state was modified.
+func (m *Manager) Reconcile() bool {
+	m.reloadState()
+
+	livePanes, err := m.CollectLivePanes()
+	if err != nil {
+		debugLog.Printf("Reconcile: CollectLivePanes failed: %v", err)
+		return false
+	}
+
+	// Build layout exclusion set
+	layoutPaneIDs := make(map[string]bool)
+	if m.State.SidebarPaneID != "" {
+		layoutPaneIDs[m.State.SidebarPaneID] = true
+	}
+	// Exclude the viewport pane only when it's NOT a session pane
+	// (i.e., it's the welcome placeholder)
+	if m.State.ViewportPaneID != "" && m.State.FindByPaneID(m.State.ViewportPaneID) == nil {
+		layoutPaneIDs[m.State.ViewportPaneID] = true
+	}
+
+	changed := m.State.Reconcile(livePanes, layoutPaneIDs)
+	if changed {
+		debugLog.Printf("Reconcile: state changed, saving")
+		m.State.Save(m.StatePath)
+	}
+	return changed
+}
+
 func (m *Manager) RefreshStatus() bool {
 	changed := false
 	for i := range m.State.Sessions {

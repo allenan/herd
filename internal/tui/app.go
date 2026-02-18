@@ -110,8 +110,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.focused = false
 		return a, nil
 	case statusTickMsg:
-		changed := a.manager.RefreshStatus()
-		if changed {
+		reconciled := a.manager.Reconcile()
+		refreshed := a.manager.RefreshStatus()
+		if reconciled || refreshed {
 			a.sidebar.SetSessions(a.manager.ListSessions())
 		}
 		return a, statusTick()
