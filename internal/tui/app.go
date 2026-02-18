@@ -146,8 +146,10 @@ func (a App) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a App) updatePrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 	result, cmd := a.prompt.Update(msg)
 	if result != nil {
-		// Prompt completed — create the session
-		a.manager.CreateSession(result.Dir, result.Name)
+		// Prompt completed — create session with placeholder name.
+		// The real name will be populated from Claude Code's terminal
+		// title via the polling loop in RefreshStatus.
+		a.manager.CreateSession(result.Dir, "New Session")
 		a.sidebar.SetSessions(a.manager.ListSessions())
 		a.sidebar.SetActive(a.manager.State.LastActiveSession)
 		a.mode = modeNormal

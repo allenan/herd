@@ -17,7 +17,17 @@ type Session struct {
 	TmuxPaneID  string    `json:"tmux_pane_id"`
 	Project     string    `json:"project"`
 	Name        string    `json:"name"`
+	Title       string    `json:"title,omitempty"`
 	Dir         string    `json:"dir"`
 	CreatedAt   time.Time `json:"created_at"`
 	Status      Status    `json:"status"`
+}
+
+// DisplayName returns the Title if set (from Claude Code's terminal title),
+// otherwise falls back to the static Name.
+func (s *Session) DisplayName() string {
+	if s.Title != "" {
+		return s.Title
+	}
+	return s.Name
 }

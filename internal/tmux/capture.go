@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/allenan/herd/internal/session"
 )
@@ -89,4 +90,50 @@ func DetectAllStatuses(sessions []session.Session) bool {
 		}
 	}
 	return changed
+}
+
+// noisePatterns are pane titles that carry no useful information and should
+// be treated as empty (so DisplayName falls back to the session Name).
+var noisePatterns = []string{
+	"bash", "zsh", "sh", "fish",
+	"claude", "claude-code",
+	"tmux",
+}
+
+// CapturePaneTitle returns the pane title set via OSC escape sequences.
+func CapturePaneTitle(paneID string) (string, error) {
+	return TmuxRunOutput("display-message", "-p", "-t", paneID, "#{pane_title}")
+}
+
+// CleanPaneTitle filters out noise titles (hostnames, shell names, bare
+// process names). Returns empty string for these so DisplayName() falls
+// back to the session Name.
+func CleanPaneTitle(raw string) string {
+	title := strings.TrimSpace(raw)
+	if title == "" {
+		return ""
+	}
+	lower := strings.ToLower(title)
+	for _, noise := range noisePatterns {
+		if lower == noise {
+			return ""
+		}
+	}
+	// Strip leading status characters that Claude Code prepends to the
+	// tab title (e.g. "* task name", "✳ task name") — we show our own
+	// status icons and don't want duplicates. Use a unicode-aware trim
+	// to catch all variants (✳, ●, *, ·, etc.) rather than enumerating.
+	title = strings.TrimLeftFunc(title, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+
+	if title == "" {
+		return ""
+	}
+
+	// Filter hostnames (common default pane title is user@host)
+	if strings.Contains(title, "@") && !strings.Contains(title, " ") {
+		return ""
+	}
+	return title
 }

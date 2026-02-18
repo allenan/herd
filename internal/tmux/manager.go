@@ -382,6 +382,15 @@ func (m *Manager) RefreshStatus() bool {
 			s.Status = next
 			changed = true
 		}
+
+		// Capture pane title set by Claude Code via OSC sequences
+		if rawTitle, err := CapturePaneTitle(s.TmuxPaneID); err == nil {
+			title := CleanPaneTitle(rawTitle)
+			if title != s.Title {
+				s.Title = title
+				changed = true
+			}
+		}
 	}
 	if changed {
 		m.State.Save(m.StatePath)
