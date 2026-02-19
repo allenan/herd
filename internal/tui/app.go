@@ -563,6 +563,13 @@ func (a App) View() string {
 	if a.focused {
 		if a.pendingDelete != nil {
 			name := a.pendingDelete.DisplayName()
+			// Truncate name so the full prompt fits within the sidebar width.
+			// Format: 1 padding + `delete "` + name + `"? y/n` + margin = 17 chars overhead.
+			maxName := a.width - 17
+			if maxName < 4 {
+				maxName = 4
+			}
+			name = truncate(name, maxName)
 			statusLine = deleteConfirmStyle.Render("delete \""+name+"\"? y/n")
 		} else if a.mode == modeSearch {
 			statusLine = searchStyle.Render("/ " + a.searchText + "█")

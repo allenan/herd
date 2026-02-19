@@ -129,6 +129,8 @@ func runMain() error {
 		// an active session that we must not overwrite.
 		if !alreadyRunning {
 			htmux.ShowPlaceholder(viewportPaneID)
+			htmux.TmuxRun("select-pane", "-t", state.SidebarPaneID)
+			htmux.PlaceholderGuardOn(viewportPaneID, state.SidebarPaneID)
 		}
 
 		if err := state.Save(statePath); err != nil {

@@ -98,7 +98,30 @@ func (m *Manager) resolveViewportPane() (string, error) {
 	}
 
 	if len(panes) < 2 {
-		return "", fmt.Errorf("resolveViewportPane: expected >= 2 panes in window 0, got %d", len(panes))
+		// Viewport pane was destroyed (e.g. Ctrl+D). Identify the sidebar
+		// from the remaining pane(s) and repair the layout.
+		var sidebarID string
+		for _, p := range panes {
+			if p.Id == m.State.SidebarPaneID || strings.Contains(p.StartCommand, "--sidebar") {
+				sidebarID = p.Id
+				break
+			}
+		}
+		if sidebarID == "" {
+			return "", fmt.Errorf("resolveViewportPane: expected >= 2 panes in window 0, got %d, and could not identify sidebar", len(panes))
+		}
+
+		debugLog.Printf("resolveViewportPane: only %d pane(s) in window 0, repairing layout", len(panes))
+		newViewport, err := RepairLayout(sidebarID)
+		if err != nil {
+			return "", fmt.Errorf("resolveViewportPane: repair failed: %w", err)
+		}
+
+		m.State.SidebarPaneID = sidebarID
+		m.State.ViewportPaneID = newViewport
+		m.State.Save(m.StatePath)
+		debugLog.Printf("resolveViewportPane: repaired, new viewport=%s", newViewport)
+		return newViewport, nil
 	}
 
 	var sidebarID string
@@ -367,6 +390,7 @@ func (m *Manager) SwitchTo(sessionID string) error {
 		if sess.Status == session.StatusDone || sess.Status == session.StatusPlanReady {
 			sess.Status = session.StatusIdle
 		}
+		PlaceholderGuardOff()
 		TmuxRun("select-pane", "-t", sess.TmuxPaneID)
 		m.State.Save(m.StatePath)
 		return nil
@@ -381,6 +405,7 @@ func (m *Manager) SwitchTo(sessionID string) error {
 
 	// After swap: the session pane is now in the viewport position,
 	// and the old viewport pane moved to where the session pane was.
+	PlaceholderGuardOff()
 	m.State.ViewportPaneID = sess.TmuxPaneID
 	m.State.LastActiveSession = sessionID
 	if sess.Status == session.StatusDone || sess.Status == session.StatusPlanReady {
@@ -458,6 +483,7 @@ func (m *Manager) KillSession(sessionID string) error {
 		debugLog.Printf("KillSession: respawned viewport pane %s with placeholder", paneID)
 		m.State.LastActiveSession = ""
 		TmuxRun("select-pane", "-t", m.State.SidebarPaneID)
+		PlaceholderGuardOn(paneID, m.State.SidebarPaneID)
 	} else {
 		// Not in viewport — just kill the pane
 		if err := TmuxRun("kill-pane", "-t", paneID); err != nil {
@@ -546,6 +572,11 @@ func (m *Manager) CollectLivePanes() ([]session.LivePane, error) {
 // Returns true if state was modified.
 func (m *Manager) Reconcile() bool {
 	m.reloadState()
+
+	// Proactively repair viewport if destroyed (e.g. Ctrl+D)
+	if _, err := m.resolveViewportPane(); err != nil {
+		debugLog.Printf("Reconcile: viewport check/repair failed (non-fatal): %v", err)
+	}
 
 	livePanes, err := m.CollectLivePanes()
 	if err != nil {

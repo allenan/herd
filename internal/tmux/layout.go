@@ -3,6 +3,7 @@ package tmux
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	gotmux "github.com/GianlucaP106/gotmux/gotmux"
 )
@@ -177,6 +178,43 @@ func ShowPlaceholder(paneID string) {
 		return
 	}
 	TmuxRun("respawn-pane", "-k", "-t", paneID, selfBin, "placeholder")
+}
+
+// PlaceholderGuardOn sets a tmux hook that bounces focus back to the sidebar
+// whenever the viewport pane (running the placeholder) receives focus.
+func PlaceholderGuardOn(viewportPaneID, sidebarPaneID string) {
+	hookCmd := fmt.Sprintf("if -F '#{==:#{pane_id},%s}' 'select-pane -t %s'", viewportPaneID, sidebarPaneID)
+	TmuxRun("set-hook", "-t", SessionName(), "pane-focus-in[99]", hookCmd)
+}
+
+// PlaceholderGuardOff removes the focus-bounce hook, allowing normal viewport interaction.
+func PlaceholderGuardOff() {
+	TmuxRun("set-hook", "-u", "-t", SessionName(), "pane-focus-in[99]")
+}
+
+// RepairLayout creates a replacement viewport pane when window 0 has only
+// the sidebar remaining (e.g. after Ctrl+D destroys the viewport pane).
+// Returns the new viewport pane ID.
+func RepairLayout(sidebarPaneID string) (string, error) {
+	out, err := TmuxRunOutput("split-window", "-h", "-P", "-F", "#{pane_id}", "-t", sidebarPaneID, "cat")
+	if err != nil {
+		return "", fmt.Errorf("RepairLayout: split-window failed: %w", err)
+	}
+	newPaneID := strings.TrimSpace(out)
+	if newPaneID == "" {
+		return "", fmt.Errorf("RepairLayout: split-window returned empty pane ID")
+	}
+
+	ShowPlaceholder(newPaneID)
+
+	// Re-enforce sidebar width
+	TmuxRun("resize-pane", "-t", sidebarPaneID, "-x", "32")
+
+	// Focus sidebar so keypresses go to the TUI, not the placeholder
+	TmuxRun("select-pane", "-t", sidebarPaneID)
+	PlaceholderGuardOn(newPaneID, sidebarPaneID)
+
+	return newPaneID, nil
 }
 
 func HasLayout(client *gotmux.Tmux) bool {

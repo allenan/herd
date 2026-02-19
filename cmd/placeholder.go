@@ -167,6 +167,13 @@ func runPlaceholder(cmd *cobra.Command, args []string) {
 	// Hide cursor
 	fmt.Print("\033[?25l")
 
+	// Disable echo so typing in the placeholder pane produces no visible output.
+	// We use MakeRaw which also disables OPOST (output post-processing),
+	// so render() must use \r\n instead of bare \n.
+	if oldState, err := term.MakeRaw(int(os.Stdin.Fd())); err == nil {
+		defer term.Restore(int(os.Stdin.Fd()), oldState)
+	}
+
 	render()
 
 	// Re-render on terminal resize
@@ -223,7 +230,7 @@ func render() {
 
 	// Top padding
 	for i := 0; i < topPad; i++ {
-		buf.WriteByte('\n')
+		buf.WriteString("\r\n")
 	}
 
 	// Art lines (centered)
@@ -238,11 +245,11 @@ func render() {
 		}
 		buf.WriteString(line)
 		buf.WriteString(reset)
-		buf.WriteByte('\n')
+		buf.WriteString("\r\n")
 	}
 
 	// Blank line between art and label
-	buf.WriteByte('\n')
+	buf.WriteString("\r\n")
 
 	// "herd" label (centered)
 	label := "herd"
@@ -256,7 +263,7 @@ func render() {
 	buf.WriteString(colorLabel)
 	buf.WriteString(label)
 	buf.WriteString(reset)
-	buf.WriteByte('\n')
+	buf.WriteString("\r\n")
 
 	// Hint line (centered)
 	hint := "Press n to create a session"
@@ -287,7 +294,7 @@ func renderTextOnly(w, h int, colorLabel, colorHint, reset string) {
 	var buf strings.Builder
 
 	for i := 0; i < topPad; i++ {
-		buf.WriteByte('\n')
+		buf.WriteString("\r\n")
 	}
 
 	labelPad := (w - len(label)) / 2
@@ -300,8 +307,8 @@ func renderTextOnly(w, h int, colorLabel, colorHint, reset string) {
 	buf.WriteString(colorLabel)
 	buf.WriteString(label)
 	buf.WriteString(reset)
-	buf.WriteByte('\n')
-	buf.WriteByte('\n')
+	buf.WriteString("\r\n")
+	buf.WriteString("\r\n")
 
 	hintPad := (w - len(hint)) / 2
 	if hintPad < 0 {
